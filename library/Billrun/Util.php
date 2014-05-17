@@ -255,9 +255,11 @@ class Billrun_Util {
 			$value = ($bytes / pow(1024, floor($units[$unit])));
 		}
 
+		if ($unit == 'B') {
+			$decimals = 0;
+		} else if (!is_numeric($decimals) || $decimals < 0) {
 		// If decimals is not numeric or decimals is less than 0 
 		// then set default value
-		if (!is_numeric($decimals) || $decimals < 0) {
 			$decimals = 2;
 		}
 
@@ -269,7 +271,7 @@ class Billrun_Util {
 			return number_format($value, $decimals);
 		}
 
-		return FALSE;
+		return 0;
 	}
 	
 	/**
@@ -289,7 +291,6 @@ class Billrun_Util {
 		}
 		return gmdate('i:s', $seconds);
 	}
-
 
 	/**
 	 * convert megabytes to bytes
@@ -314,9 +315,10 @@ class Billrun_Util {
 			$mailer->addAttachment($attachment);
 		}
 		//set recipents
-		foreach ($recipients as $recipient) {
-			$mailer->addTo($recipient);
-		}
+//		foreach ($recipients as $recipient) {
+//			$mailer->addTo($recipient);
+//		}
+		$mailer->addTo($recipients);
 		//sen email
 		return $mailer->send();
 	}
@@ -369,6 +371,101 @@ class Billrun_Util {
 			return false;
 		}
 		return true;
+	}
+
+	public static function isBillrunKey($billrun_key) {
+		return is_string($billrun_key) && Zend_Locale_Format::isInteger($billrun_key) && strlen($billrun_key) == 6 && substr($billrun_key, 4, 2) >= '01' && substr($billrun_key, 4, 2) <= '12';
+	}
+
+	/**
+	 * Cast an array / string which represents an array.
+	 * @param type $ar
+	 * @param type $type
+	 * @param type $explode
+	 * @return type
+	 */
+	public static function verify_array($ar, $type = null, $explode = ',') {
+		if (is_string($ar)) {
+			$ar = explode($explode, $ar);
+		} elseif (!is_array($ar)) {
+			settype($ar, 'array');
+		}
+		// check if casting required
+		if (!is_null($type)) {
+			$ar = array_map($type . 'val', $ar);
+		}
+		return $ar;
+	}
+
+	/**
+	 * method to convert phone number to msisdn
+	 * 
+	 * @param string $phoneNumber the phone number to convert
+	 * @param string $defaultPrefix the default prefix to add
+	 * @param boolean $cleanLeadingZeros decide if to clean leading zeros on return value
+	 * 
+	 * @return string phone number in msisdn format
+	 */
+	public static function msisdn($phoneNumber, $defaultPrefix = null, $cleanLeadingZeros = true) {
+		
+		if (empty($phoneNumber)) {
+			return $phoneNumber;
+		}
+		
+		settype($phoneNumber, 'string');
+		
+		if ($cleanLeadingZeros) {
+			$phoneNumber = self::cleanLeadingZeros($phoneNumber);
+		}
+		
+		if (self::isIntlNumber($phoneNumber)) {
+			return $phoneNumber;
+		}
+		
+		if (is_null($defaultPrefix)) {
+			$defaultPrefix = Billrun_Factory::config()->getConfigValue('billrun.defaultCountryPrefix', 972);
+		}
+
+		return $defaultPrefix . $phoneNumber;
+	}
+	
+	/**
+	 * method to check if phone number is intl number or local number base on msisdn standard
+	 * 
+	 * @param string $phoneNumber the phone number to check
+	 * 
+	 * @return boolean true in case is international phone number else false
+	 */
+	public static function isIntlNumber($phoneNumber) {
+		$replace = array("(0)", "-", "+", "(", ")", " ", "#", "*");
+		$cleanNumber = self::cleanLeadingZeros(str_replace($replace, "", $phoneNumber));
+		
+		//CCNDCSN - First part USA; second non-USA
+		if (preg_match("/^(1[2-9]{1}[0-9]{2}|[2-9]{1}[0-9]{1,2}[1-9]{1}[0-9]{0,2})[0-9]{7}$/", $cleanNumber)) {
+			return true;
+		}
+		
+		return false;
+	}
+	
+	/**
+	 * method to clean leading zero of phone number
+	 * 
+	 * @param string $number
+	 * 
+	 * @return string the number without leading zeros
+	 */
+	public static function cleanLeadingZeros($number) {
+		return ltrim($number, "0");
+	}
+
+	/**
+	 * utility to reset and initialized fork process
+	 * use this method when you open a child fork process with pcntl_fork
+	 */
+	public static function resetForkProcess() {
+		Billrun_Factory::log()->removeWriters('Mail');
+		Billrun_Factory::log()->addWriters('Mail');
 	}
 
 }
