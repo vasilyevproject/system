@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -43,29 +43,6 @@ abstract class Billrun_Calculator_Rate_Sms extends Billrun_Calculator_Rate {
 	}
 
 	/**
-	 * Write the calculation into DB.
-	 * @param $row the line CDR to update. 
-	 */
-	public function updateRow($row) {
-		Billrun_Factory::dispatcher()->trigger('beforeCalculatorWriteRow', array($row, $this));
-
-		$current = $row->getRawData();
-		$usage_type = $this->getLineUsageType($row);
-		$volume = $this->getLineVolume($row, $usage_type);
-		$rate = $this->getLineRate($row, $usage_type);
-		$added_values = array(
-			'usaget' => $usage_type,
-			'usagev' => $volume,
-			$this->ratingField => $rate ? $rate->createRef() : $rate,
-		);
-		$newData = array_merge($current, $added_values);
-		$row->setRawData($newData);
-
-		Billrun_Factory::dispatcher()->trigger('afterCalculatorWriteRow', array($row, $this));
-		return true;
-	}
-
-	/**
 	 * @see Billrun_Calculator_Rate::getLineVolume
 	 */
 	protected function getLineVolume($row, $usage_type) {
@@ -85,9 +62,9 @@ abstract class Billrun_Calculator_Rate_Sms extends Billrun_Calculator_Rate {
 	 * @return type
 	 */
 	protected function shouldLineBeRated($row) {
-		return ($row['type'] == 'smpp' && $row['record_type'] == '1' && in_array($row['called_number'], array('000000000002020', '000000000006060', '000000000007070', '000000000005060', '000000000002040'))) ||
-			($row['type'] == 'smsc' && $row['record_type'] == '1' && $row["cause_of_terminition"] == "100" && preg_match("/^0*9725[82]/", $row["calling_msc"]) ) ||
-			($row['type'] == 'mmsc' && ('S' == $row['action']) && $row['final_state'] == 'S' && preg_match('/^\+\d+\/TYPE\s*=\s*.*telecom.com/', $row['mm_source_addr']));
+		return ($row['type'] == 'smpp' && $row['record_type'] == '1') || // also remove these numbers before commiting
+				($row['type'] == 'smsc' && $row['record_type'] == '1' && $row["cause_of_terminition"] == "100" && preg_match("/^0*9725[82]/", $row["calling_msc"]) ) ||
+				($row['type'] == 'mmsc' && ('S' == $row['action']) && $row['final_state'] == 'S' && preg_match('/^\+\d+\/TYPE\s*=\s*.*golantelecom/', $row['mm_source_addr']));
 	}
 
 	/**
@@ -95,14 +72,14 @@ abstract class Billrun_Calculator_Rate_Sms extends Billrun_Calculator_Rate {
 	 */
 	protected function getLineRate($row, $usage_type) {
 		if ($this->shouldLineBeRated($row)) {
-			$matchedRate = false;
+			$matchedRate = $this->rates['UNRATED'];
 			$called_number = $this->extractNumber($row);
 			$line_time = $row['urt'];
-			$called_number_prefixes = $this->getPrefixes($called_number);
+			$called_number_prefixes = Billrun_Util::getPrefixes($called_number);
 			foreach ($called_number_prefixes as $prefix) {
 				if (isset($this->rates[$prefix])) {
 					foreach ($this->rates[$prefix] as $rate) {
-						if (isset($rate['rates'][$usage_type])) {
+						if (isset($rate['rates'][$usage_type]) && (!isset($rate['params']['fullEqual']) || $prefix == $called_number)) {
 							if ($rate['from'] <= $line_time && $rate['to'] >= $line_time) {
 								$matchedRate = $rate;
 								break 2;
@@ -115,6 +92,12 @@ abstract class Billrun_Calculator_Rate_Sms extends Billrun_Calculator_Rate {
 		} else {
 			return false;
 		}
+	}
+	/**
+	 * @see Billrun_Calculator::isRateValid()
+	 */
+	protected function isRateValid($rate) {
+		return preg_match("/^(?!AC_|VF_|LEFTOVER_AC_TO_VF_)/", $rate['key']);
 	}
 
 	/**

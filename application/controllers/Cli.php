@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -21,8 +21,17 @@ class CliController extends Yaf_Controller_Abstract {
 	protected $options;
 
 	public function init() {
+		$forceUser = Billrun_Factory::config()->getConfigValue('cliForceUser', '');
+		$systemExecuterUser = trim(shell_exec('whoami'));
+		if (!empty($forceUser) && $systemExecuterUser != $forceUser && $systemExecuterUser != 'apache') {
+			Billrun_Log::getInstance()->addWriter(new Zend_Log_Writer_Stream('php://stdout'));
+			$this->addOutput('Cannot run cli command with the system user ' . $systemExecuterUser . '. Please use ' . $forceUser . ' for CLI operations');
+			exit();
+		}
 		$this->setActions();
 		$this->setOptions();
+		// this will verify db config will load into main config
+		Billrun_Factory::db();
 	}
 
 	/**
@@ -52,6 +61,7 @@ class CliController extends Yaf_Controller_Abstract {
 				'size-s' => 'the size of the page to aggregate',
 				'environment-s' => 'Environment of the running command',
 				'env-s' => 'Environment of the running command',
+				'fetchonly' => 'Only fetch data from remote or db instead of doing complete action',
 			);
 
 			$this->options = new Zend_Console_Getopt($input);
@@ -93,13 +103,13 @@ class CliController extends Yaf_Controller_Abstract {
 
 
 		//Go through all actions and run the first one that was selected
-		foreach (array_keys($this->actions) as $val) {
-			if (isset($this->options->{$val})) {
-				$this->addOutput(ucfirst($val) . "...");
-				$this->forward($val);
+			foreach (array_keys($this->actions) as $val) {
+				if (isset($this->options->{$val})) {
+					$this->addOutput(ucfirst($val) . "...");
+					$this->forward($val);
+				}
 			}
 		}
-	}
 
 	/**
 	 * method to add output to the stream and log

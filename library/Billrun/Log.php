@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -72,6 +72,36 @@ class Billrun_Log extends Zend_Log {
 		}
 
 		parent::log($message, $priority, $extras);
+	}
+
+	public function removeWriters($writerName) {
+		$log = Billrun_Factory::config()->getConfigValue('log', array());
+		if ($log) {
+			foreach ($log as $writer) {
+				if (is_array($writer)) {
+					if ($writer['writerName'] == $writerName) {
+						$className = $this->getClassName($writer, "writer", $this->_defaultWriterNamespace);
+						foreach ($this->_writers as $writerIndex => $writer) {
+							if (get_class($writer) == $className) {
+								unset($this->_writers[$writerIndex]);
+							}
+						}
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	public function addWriters($writerName) {
+		$log = Billrun_Factory::config()->getConfigValue('log', array());
+		if ($log) {
+			foreach ($log as $writer) {
+				if (is_array($writer) && $writer['writerName'] == $writerName) {
+					$this->addWriter($writer);
+				}
+			}
+		}
 	}
 
 }

@@ -3,7 +3,7 @@
 /**
  * @package         Mongodloid
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 class Mongodloid_Query implements IteratorAggregate {
 
@@ -111,7 +111,7 @@ class Mongodloid_Query implements IteratorAggregate {
 	}
 
 	public function cursor() {
-		return new Mongodloid_Cursor($this->_collection->find($this->_params));
+		return new Mongodloid_Cursor($this->_collection->find($this->_params), $this->_collection->getWriteConcern('wtimeout'));
 	}
 
 	public function query($key, $value = null) {

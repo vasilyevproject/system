@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -104,7 +104,7 @@ class nrtrdePlugin extends Billrun_Plugin_BillrunPluginFraud {
 	 * @param Billrun_Processor $processor the proce
 	 * @param string $file_path the path of the current processing file.
 	 */
-	public function afterProcessorBackup($processor, &$file_path) {
+	public function afterProcessorStore($processor, &$file_path) {
 		if ($processor->getType() != $this->getName()) {
 			return;
 		}
@@ -199,7 +199,7 @@ class nrtrdePlugin extends Billrun_Plugin_BillrunPluginFraud {
 
 		$having = array(
 			'$match' => array(
-				'moc_israel' => array('$gte' => Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.moc.israel', 9999999, 'int'))
+				'moc_israel' => array('$gte' => Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.moc.israel', 1800, 'int'))
 			),
 		);
 
@@ -214,7 +214,7 @@ class nrtrdePlugin extends Billrun_Plugin_BillrunPluginFraud {
 		$group['$group']['moc_nonisrael'] = $group['$group']['moc_israel'];
 		unset($group['$group']['moc_israel']);
 		unset($having['$match']['moc_israel']);
-		$having['$match']['moc_nonisrael'] = array('$gte' => Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.moc.nonisrael', 9999999, 'int'));
+		$having['$match']['moc_nonisrael'] = array('$gte' => Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.moc.nonisrael', 600, 'int'));
 		$project['$project']['moc_nonisrael'] = 1;
 		unset($project['$project']['moc_israel']);
 		Billrun_Factory::log()->log("nrtrdePlugin::handlerCollect collecting moc_nonisrael exceeders", Zend_Log::DEBUG);
@@ -226,7 +226,7 @@ class nrtrdePlugin extends Billrun_Plugin_BillrunPluginFraud {
 		$group['$group']['mtc_all'] = $group['$group']['moc_nonisrael'];
 		unset($group['$group']['moc_nonisrael']);
 		unset($having['$match']['moc_nonisrael']);
-		$having['$match']['mtc_all'] = array('$gte' => Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.mtc', 9999999, 'int'));
+		$having['$match']['mtc_all'] = array('$gte' => Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.mtc', 2400, 'int'));
 		$project['$project']['mtc_all'] = 1;
 		unset($project['$project']['moc_nonisrael']);
 		Billrun_Factory::log()->log("nrtrdePlugin::handlerCollect collecting mtc_all exceeders", Zend_Log::DEBUG);
@@ -239,7 +239,7 @@ class nrtrdePlugin extends Billrun_Plugin_BillrunPluginFraud {
 		unset($group['$group']['mtc_all']);
 		unset($having['$match']['mtc_all']);
 		$group['$group']['sms_out'] = array('$sum' => 1);
-		$having['$match']['sms_out'] = array('$gte' => Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.smsout', 9999999, 'int'));
+		$having['$match']['sms_out'] = array('$gte' => Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.smsout', 70, 'int'));
 		$project['$project']['sms_out'] = 1;
 		unset($project['$project']['mtc_all']);
 		Billrun_Factory::log()->log("nrtrdePlugin::handlerCollect collecting sms_out exceeders", Zend_Log::DEBUG);
@@ -252,7 +252,7 @@ class nrtrdePlugin extends Billrun_Plugin_BillrunPluginFraud {
 		$timeWindow = strtotime("-" . Billrun_Factory::config()->getConfigValue('nrtrde.hourly.timespan', '1h'));
 		$where['$match']['urt'] = array('$gt' => new MongoDate($timeWindow));
 		$group['$group']['sms_hourly'] = array('$sum' => 1);
-		$having['$match']['sms_hourly'] = array('$gte' => Billrun_Factory::config()->getConfigValue('nrtrde.hourly.thresholds.smsout', 9999999, 'int'));
+		$having['$match']['sms_hourly'] = array('$gte' => Billrun_Factory::config()->getConfigValue('nrtrde.hourly.thresholds.smsout', 250, 'int'));
 		$project['$project']['sms_hourly'] = 1;
 		Billrun_Factory::log()->log("nrtrdePlugin::handlerCollect collecting sms_hourly exceeders", Zend_Log::DEBUG);
 		$sms_hourly = $lines->aggregate($base_match, $where, $group, $project, $having);
@@ -264,7 +264,7 @@ class nrtrdePlugin extends Billrun_Plugin_BillrunPluginFraud {
 		$where['$match']['urt'] = array('$gt' => new MongoDate($timeWindow));
 		$where['$match']['callEventDurationRound'] = array('$gt' => 0);
 		$group['$group']['moc_nonisrael_hourly'] = array('$sum' => '$callEventDurationRound');
-		$having['$match']['moc_nonisrael_hourly'] = array('$gte' => Billrun_Factory::config()->getConfigValue('nrtrde.hourly.thresholds.mocnonisrael', 9999999));
+		$having['$match']['moc_nonisrael_hourly'] = array('$gte' => Billrun_Factory::config()->getConfigValue('nrtrde.hourly.thresholds.mocnonisrael', 3000));
 		$project['$project']['moc_nonisrael_hourly'] = 1;
 		Billrun_Factory::log()->log("nrtrdePlugin::handlerCollect collecting moc_nonisrael_hourly exceeders", Zend_Log::DEBUG);
 		$moc_nonisrael_hourly = $lines->aggregate($base_match, $where, $group, $project, $having);
@@ -308,6 +308,7 @@ class nrtrdePlugin extends Billrun_Plugin_BillrunPluginFraud {
 	 * @todo LOOSE COUPLING !!!
 	 */
 	protected function addAlertData(&$event) {
+		// @todo: WTF?!?! Are you real with this condition???
 		$type = isset($event['moc_israel']) ? 'moc_israel' :
 			(isset($event['moc_nonisrael']) ? 'moc_nonisrael' :
 				(isset($event['mtc_all']) ? 'mtc_all' :
@@ -321,38 +322,38 @@ class nrtrdePlugin extends Billrun_Plugin_BillrunPluginFraud {
 
 		switch ($type) {
 			case 'moc_israel':
-				$event['threshold'] = Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.moc.israel', 9999999, 'int');
+				$event['threshold'] = Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.moc.israel', 1800, 'int');
 				break;
 
 			case 'moc_nonisrael':
-				$event['threshold'] = Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.moc.nonisrael', 9999999);
+				$event['threshold'] = Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.moc.nonisrael', 600);
 				break;
 
 			case 'mtc_all':
-				$event['threshold'] = Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.mtc', 9999999);
+				$event['threshold'] = Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.mtc', 7200);
 				break;
 
 			case 'sms_out':
-				$event['threshold'] = Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.smsout', 9999999);
+				$event['threshold'] = Billrun_Factory::config()->getConfigValue('nrtrde.thresholds.smsout', 70);
 				$event['units'] = 'SMS';
 				$event['event_type'] = 'NRTRDE_SMS';
 				break;
 
 			case 'sms_hourly':
-				$event['threshold'] = Billrun_Factory::config()->getConfigValue('nrtrde.hourly.thresholds.smsout', 9999999);
+				$event['threshold'] = Billrun_Factory::config()->getConfigValue('nrtrde.hourly.thresholds.smsout', 250);
 				$event['units'] = 'SMS';
 				$event['event_type'] = 'NRTRDE_HOURLY_SMS';
 				break;
 
 			case 'moc_nonisrael_hourly':
-				$event['threshold'] = Billrun_Factory::config()->getConfigValue('nrtrde.hourly.thresholds.mocnonisrael', 9999999);
+				$event['threshold'] = Billrun_Factory::config()->getConfigValue('nrtrde.hourly.thresholds.mocnonisrael', 3000);
 				$event['event_type'] = 'NRTRDE_HOURLY_VOICE';
 				break;
 		}
 
 		$event['effects'] = array(
 			'key' => 'type',
-			'filter' => array('$in' => array())
+			'filter' => array('$in' => array('nrtrde', 'ggsn'))
 		);
 
 		return $event;

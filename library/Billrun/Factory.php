@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -85,6 +85,33 @@ class Billrun_Factory {
 	protected static $plan = array();
 
 	/**
+	 * Smser instance
+	 * 
+	 * @var Billrun Smser
+	 */
+	protected static $smser = null;
+	
+	/**
+	 * Mailer instance
+	 * 
+	 * @var Billrun Mail
+	 */
+	protected static $mailer = null;
+	
+	/**
+	 * Users container
+	 * 
+	 * @var Mongodloid_Entity
+	 */
+	protected static $users = array();
+
+	/**
+	 * Authentication main dispatcher
+	 * 
+	 * @var Zend_Auth
+	 */
+	protected static $auth;
+	/**
 	 * method to retrieve the log instance
 	 * 
 	 * @param string [Optional] $message message to log
@@ -130,13 +157,17 @@ class Billrun_Factory {
 	 * @return Billrun_Db
 	 */
 	static public function db(array $options = array()) {
+		$mainDb = 0;
 		if (empty($options)) {
 			$options = Billrun_Factory::config()->getConfigValue('db'); // the stdclass force it to return object
-		} else if (isset($options['name']) && in_array($options['name'], array('balances', 'billrunstats')) && count($options) == 1) {
+			$mainDb = 1;
+		} else if (isset($options['name']) && count($options) == 1) {
 			$name = $options['name'];
-			// move balances to different database
 			$options = Billrun_Factory::config()->getConfigValue('db');
-			$options['name'] = $name;
+			$seperateDatabaseCollections = isset($options['seperateDatabaseCollections']) ? $options['seperateDatabaseCollections'] : array('balances', 'billrunstats', 'billrun'); // until mongo will do collection lock
+			if (in_array($name, $seperateDatabaseCollections)) {
+				$options['name'] = $name;
+			}
 		}
 
 		// unique stamp per db connection
@@ -144,6 +175,9 @@ class Billrun_Factory {
 
 		if (!isset(self::$db[$stamp])) {
 			self::$db[$stamp] = Billrun_Db::getInstance($options);
+			if ($mainDb) {
+				Billrun_Factory::config()->loadDbConfig();
+			}
 		}
 
 		return self::$db[$stamp];
@@ -155,15 +189,20 @@ class Billrun_Factory {
 	 * @return Billrun_Cache
 	 */
 	static public function cache() {
-		if (!self::$cache) {
-			$args = self::config()->getConfigValue('cache', array());
-			if (empty($args)) {
-				return false;
+		try {
+			if (!self::$cache) {
+				$args = self::config()->getConfigValue('cache', array());
+				if (empty($args)) {
+					return false;
+				}
+				self::$cache = Billrun_Cache::getInstance($args);
 			}
-			self::$cache = Billrun_Cache::getInstance($args);
-		}
 
-		return self::$cache;
+			return self::$cache;
+		} catch (Exception $e) {
+			Billrun_Factory::log('Cache instance cannot be generated', Zend_Log::ALERT);
+		}
+		return false;
 	}
 
 	/**
@@ -172,18 +211,39 @@ class Billrun_Factory {
 	 * @return Billrun_Db
 	 */
 	static public function mailer() {
+		if (!isset(self::$mailer)) {
 		try {
-			$mail = new Zend_Mail();
+				self::$mailer = new Zend_Mail();
 			//TODO set common configuration.
 			$fromName = Billrun_Factory::config()->getConfigValue('mailer.from.address', 'no-reply');
 			$fromAddress = Billrun_Factory::config()->getConfigValue('mailer.from.name', 'Billrun');
-			$mail->setFrom($fromName, $fromAddress);
+				self::$mailer->setFrom($fromName, $fromAddress);
 			//$mail->setDefaultTransport($transport);
-			return $mail;
 		} catch (Exception $e) {
 			self::log("Can't instantiat mail object. Please check your settings", Zend_Log::ALERT);
 			return false;
 		}
+	}
+		return self::$mailer;
+	}
+
+	/**
+	 * method to retrieve the a smser instance
+	 * 
+	 * @return Billrun_Sms
+	 * 
+	 * @todo Refactoring Billrun_Sms object
+	 */
+	static public function smser($options = array()) {
+		if (empty($options)) {
+			$options = Billrun_Factory::config()->getConfigValue('sms');
+		}
+		$stamp = Billrun_Util::generateArrayStamp($options);
+		if (!isset(self::$smser[$stamp])) {
+			self::$smser[$stamp] = new Billrun_Sms($options);
+		}
+
+		return self::$smser[$stamp];
 	}
 
 	/**
@@ -286,5 +346,34 @@ class Billrun_Factory {
 		$billrunSettings = self::config()->getConfigValue('billrun', array());
 		return new Billrun_Billrun(array_merge($billrunSettings, $params));
 	}
+
+	/**
+	 * Receive a billrun user
+	 * @param string $username
+	 * @return Billrun_User
+	 */
+	public static function user($username = null) {
+		if (is_null($username)) {
+			$username = Billrun_Factory::auth()->getIdentity();
+		}
+		
+		if (empty($username)) {
+			return FALSE;
+		}
+		
+		if (!isset(self::$users[$username])) {
+			$entity = Billrun_Factory::db()->usersCollection()->query(array('username' => $username))->cursor()->current();
+			self::$users[$username] = new Billrun_User($entity);
+		}
+		return self::$users[$username];
+	}
+	
+	public static function auth() {
+		if (!isset(self::$auth)) {
+			self::$auth = Zend_Auth::getInstance()->setStorage(new Zend_Auth_Storage_Yaf());
+		}
+		return self::$auth;
+	}
+
 
 }

@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -23,13 +23,67 @@ class AdminController extends Yaf_Controller_Abstract {
 	protected $session = null;
 	protected $model = null;
 	protected $baseUrl = null;
+	protected $cssPaths = array();
+	protected $jsPaths = array();
+	protected $commit;
 
 	/**
 	 * method to control and navigate the user to the right view
 	 */
 	public function init() {
+		if (APPLICATION_ENV === 'prod') {
+			// TODO: set the branch through config
+			$branch = 'production';
+			if (file_exists(APPLICATION_PATH . '/.git/refs/heads/' . $branch)) {
+				$this->commit = rtrim(file_get_contents(APPLICATION_PATH . '/.git/refs/heads/' . $branch), "\n");
+			} else {
+				$this->commit = md5(date('ymd'));
+			}
+		} else {
+			$this->commit = md5(time());
+		}
+
 		$this->baseUrl = $this->getRequest()->getBaseUri();
+		$this->addCss($this->baseUrl . '/css/bootstrap.min.css');
+		$this->addCss($this->baseUrl . '/css/bootstrap-datetimepicker.min.css');
+		$this->addCss($this->baseUrl . '/css/bootstrap-switch.css');
+		$this->addCss($this->baseUrl . '/css/bootstrap-multiselect.css');
+		$this->addCss($this->baseUrl . '/css/jsoneditor.css');
+		$this->addCss($this->baseUrl . '/css/main.css');
+		$this->addJs($this->baseUrl . '/js/vendor/bootstrap.min.js');
+		$this->addJs($this->baseUrl . '/js/plugins.js');
+		$this->addJs($this->baseUrl . '/js/moment.js');
+		$this->addJs($this->baseUrl . '/js/bootstrap-datetimepicker.min.js');
+		$this->addJs($this->baseUrl . '/js/jquery.jsoneditor.js');
+		$this->addJs($this->baseUrl . '/js/bootstrap-multiselect.js');
+		$this->addJs($this->baseUrl . '/js/bootstrap-switch.js');
+		$this->addJs($this->baseUrl . '/js/jquery.csv-0.71.min.js');
+		$this->addJs($this->baseUrl . '/js/main.js');
 		Yaf_Loader::getInstance(APPLICATION_PATH . '/application/helpers')->registerLocalNamespace('Admin');
+	}
+
+	protected function addCss($path) {
+		$this->cssPaths[] = $path;
+	}
+
+	protected function addJs($path) {
+		$this->jsPaths[] = $path;
+	}
+
+	protected function fetchJsFiles() {
+		$ret = '';
+		foreach ($this->jsPaths as $jsPath) {
+			$ret.='<script src="' . $jsPath . (Billrun_Factory::config()->isProd() ? '?' . $this->commit : '') . '"></script>' . PHP_EOL;
+		}
+		return $ret;
+	}
+
+	protected function fetchCssFiles() {
+		$ret = '';
+		foreach ($this->cssPaths as $cssPath) {
+			$ret.='<link rel="stylesheet" href="' . $cssPath . '?' . $this->commit . '">' . PHP_EOL;
+		}
+		return $ret;
 	}
 
 	/**
@@ -49,12 +103,18 @@ class AdminController extends Yaf_Controller_Abstract {
 	 * @todo move to model
 	 */
 	public function editAction() {
+		if (!$this->allowed('read'))
+			return false;
 		$coll = Billrun_Util::filter_var($this->getRequest()->get('coll'), FILTER_SANITIZE_STRING);
 		$id = Billrun_Util::filter_var($this->getRequest()->get('id'), FILTER_SANITIZE_STRING);
 		$type = Billrun_Util::filter_var($this->getRequest()->get('type'), FILTER_SANITIZE_STRING);
 
-		$model = self::getModel($coll);
-		$entity = $model->getItem($id);
+		$model = self::initModel($coll);
+		if ($type == 'new') {
+			$entity = $model->getEmptyItem();
+		} else {
+			$entity = $model->getItem($id);
+		}
 		if ($type == 'close_and_new' && is_subclass_of($model, "TabledateModel") && !$model->isLast($entity)) {
 			die("There's already a newer entity with this key");
 		}
@@ -68,13 +128,15 @@ class AdminController extends Yaf_Controller_Abstract {
 	}
 
 	public function confirmAction() {
+		if (!$this->allowed('write'))
+			return false;
 		$coll = Billrun_Util::filter_var($this->getRequest()->get('coll'), FILTER_SANITIZE_STRING);
 		$ids = Billrun_Util::filter_var($this->getRequest()->get('id'), FILTER_SANITIZE_STRING);
 		$type = Billrun_Util::filter_var($this->getRequest()->get('type'), FILTER_SANITIZE_STRING);
 
-		$model = self::getModel($coll);
+		$model = self::initModel($coll);
 
-		if ($type == 'remove' && $coll != 'lines') {
+		if ($type == 'remove' && !in_array($coll, array('lines', 'users'))) {
 			$entity = $model->getItem($ids);
 			$this->getView()->entity = $entity;
 			$this->getView()->key = $entity[$model->search_key];
@@ -84,9 +146,8 @@ class AdminController extends Yaf_Controller_Abstract {
 				die("Only future entities could be removed");
 			}
 		} else {
-			$this->getView()->key = "the selected lines";
+			$this->getView()->key = "the selected documents";
 		}
-
 
 		$this->getView()->collectionName = $coll;
 		$this->getView()->type = $type;
@@ -101,6 +162,8 @@ class AdminController extends Yaf_Controller_Abstract {
 	 * @todo protect the from and to to be continuely
 	 */
 	public function removeAction() {
+		if (!$this->allowed('write'))
+			die(json_encode(null));
 		$ids = explode(",", Billrun_Util::filter_var($this->getRequest()->get('ids'), FILTER_SANITIZE_STRING));
 		if (!is_array($ids) || count($ids) == 0 || empty($ids)) {
 			return;
@@ -108,7 +171,11 @@ class AdminController extends Yaf_Controller_Abstract {
 		$coll = Billrun_Util::filter_var($this->getRequest()->get('coll'), FILTER_SANITIZE_STRING);
 		$type = Billrun_Util::filter_var($this->getRequest()->get('type'), FILTER_SANITIZE_STRING);
 
-		$model = self::getModel($coll);
+		$model = self::initModel($coll);
+
+		if ($coll == 'users' && in_array(strval(Billrun_Factory::user()->getMongoId()), $ids)) { // user is not allowed to remove oneselfs
+			die(json_encode("Can't remove oneself"));
+		}
 
 		$collection = Billrun_Factory::db()->getCollection($coll);
 		if (!($collection instanceof Mongodloid_Collection)) {
@@ -141,12 +208,15 @@ class AdminController extends Yaf_Controller_Abstract {
 	 * @todo protect the from and to to be continuely
 	 */
 	public function saveAction() {
+		if (!$this->allowed('write'))
+			die(json_encode(null));
 		$flatData = $this->getRequest()->get('data');
+		$type = Billrun_Util::filter_var($this->getRequest()->get('type'), FILTER_SANITIZE_STRING);
 		$id = Billrun_Util::filter_var($this->getRequest()->get('id'), FILTER_SANITIZE_STRING);
 		$coll = Billrun_Util::filter_var($this->getRequest()->get('coll'), FILTER_SANITIZE_STRING);
-		$type = Billrun_Util::filter_var($this->getRequest()->get('type'), FILTER_SANITIZE_STRING);
-
-		$model = self::getModel($coll);
+		$dup_rates = $this->getRequest()->get('duplicate_rates');
+		$duplicate_rates = ($dup_rates == 'true') ? true : false;
+		$model = self::initModel($coll);
 
 		$collection = Billrun_Factory::db()->getCollection($coll);
 		if (!($collection instanceof Mongodloid_Collection)) {
@@ -155,17 +225,23 @@ class AdminController extends Yaf_Controller_Abstract {
 
 		$data = @json_decode($flatData, true);
 
-		if (empty($data) || empty($id) || empty($coll)) {
+		if (empty($data) || ($type != 'new' && empty($id)) || empty($coll)) {
 			return false;
 		}
 
-		$params = array_merge($data, array('_id' => new MongoId($id)));
-
+		if ($id) {
+			$params = array_merge($data, array('_id' => new MongoId($id)));
+		} else {
+			$params = $data;
+		}
+		if ($duplicate_rates) {
+			$params = array_merge($params, array('duplicate_rates' => $duplicate_rates));
+		}
 		if ($type == 'update') {
 			$saveStatus = $model->update($params);
 		} else if ($type == 'close_and_new') {
 			$saveStatus = $model->closeAndNew($params);
-		} else if ($type == 'duplicate') {
+		} else if (in_array($type, array('duplicate', 'new'))) {
 			$saveStatus = $model->duplicate($params);
 		}
 
@@ -184,7 +260,7 @@ class AdminController extends Yaf_Controller_Abstract {
 		$stamp = Billrun_Util::filter_var($this->getRequest()->get('stamp'), FILTER_SANITIZE_STRING);
 		$type = Billrun_Util::filter_var($this->getRequest()->get('type'), FILTER_SANITIZE_STRING);
 
-		$model = self::getModel($coll);
+		$model = self::initModel($coll);
 		$entity = $model->getDataByStamp(array("stamp" => $stamp));
 
 		// passing values into the view
@@ -195,20 +271,26 @@ class AdminController extends Yaf_Controller_Abstract {
 	}
 
 	public function csvExportAction() {
-		$session = $this->getSession('lines');
+		if (!$this->allowed('read'))
+			return false;
+
+		$collectionName = $this->getRequest()->get("collection");
+		$session = $this->getSession($collectionName);
 
 		if (!empty($session->query)) {
 
 			$options = array(
-				'collection' => 'lines',
-				'sort' => array('urt' => 1),
+				'collection' => $collectionName,
+				'sort' => $this->applySort($collectionName),
 			);
-			$model = self::getModel('lines', $options);
 
-			$skip = Billrun_Factory::config()->getConfigValue('admin_panel.csv_export.skip', 0);
-			$size = Billrun_Factory::config()->getConfigValue('admin_panel.csv_export.size', 10000);
+			// init model
+			self::initModel($collectionName, $options);
+
+			$skip = intval(Billrun_Factory::config()->getConfigValue('admin_panel.csv_export.skip', 0));
+			$size = intval(Billrun_Factory::config()->getConfigValue('admin_panel.csv_export.size', 10000));
 			$params = array_merge($this->getTableViewParams($session->query, $skip, $size), $this->createFilterToolbar('lines'));
-			Admin_Lines::getCsvFile($params);
+			$this->model->exportCsvFile($params);
 		} else {
 			return false;
 		}
@@ -233,6 +315,8 @@ class AdminController extends Yaf_Controller_Abstract {
 	 * plans controller of admin
 	 */
 	public function plansAction() {
+		if (!$this->allowed('read'))
+			return false;
 		$this->forward("tabledate", array('table' => 'plans'));
 		return false;
 	}
@@ -241,6 +325,8 @@ class AdminController extends Yaf_Controller_Abstract {
 	 * rates controller of admin
 	 */
 	public function ratesAction() {
+		if (!$this->allowed('read'))
+			return false;
 		$session = $this->getSession("rates");
 		$show_prefix = $this->getSetVar($session, 'showprefix', 'showprefix', 0);
 		$this->forward("tabledate", array('table' => 'rates', 'showprefix' => $show_prefix));
@@ -261,16 +347,109 @@ class AdminController extends Yaf_Controller_Abstract {
 		);
 
 		// set the model
-		self::getModel($table, $options);
+		self::initModel($table, $options);
 		$query = $this->applyFilters($table);
 
-		$this->getView()->component = $this->buildComponent($table, $query);
+		$this->getView()->component = $this->buildTableComponent($table, $query);
+	}
+
+	public function loginAction() {
+		if (Billrun_Factory::user() !== FALSE) {
+			// if already logged-in redirect to admin homepage
+			$this->forceRedirect($this->baseUrl . '/admin/');
+		}
+		$params = array_merge($this->getRequest()->getParams(), $this->getRequest()->getPost());
+		$db = Billrun_Factory::db()->usersCollection()->getMongoCollection();
+
+		$username = $this->getRequest()->get('username');
+		$password = $this->getRequest()->get('password');
+
+		if ($username != '' && !is_null($password)) {
+			$adapter = new Zend_Auth_Adapter_MongoDb(
+				$db, 'username', 'password'
+			);
+
+			$adapter->setIdentity($username);
+			$adapter->setCredential($password);
+
+			$result = Billrun_Factory::auth()->authenticate($adapter);
+
+			if ($result->isValid()) {
+				$ip = $this->getRequest()->getServer('REMOTE_ADDR', 'Unknown IP');
+				Billrun_Factory::log()->log('User ' . $username . ' logged in to admin panel from IP: ' . $ip, Zend_log::INFO);
+				// TODO: stringify to url encoding (A-Z,a-z,0-9)
+				$ret_action = $this->getRequest()->get('ret_action');
+//				if (empty($ret_action)) {
+//					$ret_action = 'admin';
+//				}
+				$this->forceRedirect($this->baseUrl . $ret_action);
+				return true;
+			}
+		}
+
+		$this->getView()->component = $this->getLoginForm($params);
+	}
+
+	protected function getLoginForm($params) {
+		$this->title = "Login";
+
+		// TODO: use ready pager/paginiation class (zend? joomla?) with auto print
+		$params = array_merge(array(
+			'title' => $this->title,
+			), $params);
+//		$params = array_merge($options, $params, $this->getTableViewParams($filter_query), $this->createFilterToolbar($table));
+
+		$ret = $this->renderView('login', $params);
+		return $ret;
+	}
+
+	/**
+	 * method to check if user is authorize to resource
+	 * 
+	 * @param string $permission the permission require authorization
+	 * 
+	 * @return boolean true if have access, else false
+	 * 
+	 * @todo: refactoring to core
+	 */
+	static public function authorized($permission) {
+		$user = Billrun_Factory::user();
+		if (!$user || !$user->valid() || !$user->allowed($permission)) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * method to check if user is allowed to access page, if not redirect or show error message
+	 * 
+	 * @param string $permission the permission required to the page
+	 * 
+	 * @return boolean true if have access, else false
+	 * 
+	 */
+	protected function allowed($permission) {
+		if (self::authorized($permission)) {
+			return true;
+		}
+
+		if (Billrun_Factory::user()) {
+			$this->forward('error');
+			return false;
+		}
+
+		$this->forward('login', array('ret_action' => $this->getRequest()->getActionName()));
+		return false;
 	}
 
 	/**
 	 * lines controller of admin
 	 */
 	public function linesAction() {
+		if (!$this->allowed('read'))
+			return false;
+
 		$table = 'lines';
 		$sort = $this->applySort($table);
 		$options = array(
@@ -278,19 +457,47 @@ class AdminController extends Yaf_Controller_Abstract {
 			'sort' => $sort,
 		);
 
-		self::getModel($table, $options);
+		self::initModel($table, $options);
 		$query = $this->applyFilters($table);
 
 		$session = $this->getSession($table);
+		// this use for export
 		$this->getSetVar($session, $query, 'query', $query);
 
-		$this->getView()->component = $this->buildComponent('lines', $query);
+		$this->getView()->component = $this->buildTableComponent('lines', $query);
+	}
+
+	public function queueAction() {
+		if (!$this->allowed('read'))
+			return false;
+
+		$table = 'queue';
+		$sort = $this->applySort($table);
+		$options = array(
+			'collection' => $table,
+			'sort' => $sort,
+		);
+
+		self::initModel($table, $options);
+		$query = $this->applyFilters($table);
+
+		$session = $this->getSession($table);
+		// this use for export
+		$this->getSetVar($session, $query, 'query', $query);
+
+		$this->getView()->component = $this->buildTableComponent('queue', $query);
+	}
+
+	protected function errorAction() {
+		$this->getView()->component = $this->renderView('error');
 	}
 
 	/**
 	 * events controller of admin
 	 */
 	public function eventsAction() {
+		if (!$this->allowed('read'))
+			return false;
 		$table = "events";
 //		$sort = array('creation_time' => -1);
 		$sort = $this->applySort($table);
@@ -299,16 +506,18 @@ class AdminController extends Yaf_Controller_Abstract {
 			'sort' => $sort,
 		);
 
-		$model = self::getModel($table, $options);
+		self::initModel($table, $options);
 		$query = $this->applyFilters($table);
 
-		$this->getView()->component = $this->buildComponent($table, $query);
+		$this->getView()->component = $this->buildTableComponent($table, $query);
 	}
 
 	/**
 	 * log controller of admin
 	 */
 	public function logAction() {
+		if (!$this->allowed('read'))
+			return false;
 		$table = "log";
 //		$sort = array('received_time' => -1);
 		$sort = $this->applySort($table);
@@ -317,10 +526,98 @@ class AdminController extends Yaf_Controller_Abstract {
 			'sort' => $sort,
 		);
 
-		$model = self::getModel($table, $options);
+		$model = self::initModel($table, $options);
 		$query = $this->applyFilters($table);
 
-		$this->getView()->component = $this->buildComponent($table, $query);
+		$this->getView()->component = $this->buildTableComponent($table, $query);
+	}
+
+	/**
+	 * log controller of admin
+	 */
+	public function balancesAction() {
+		if (!$this->allowed('read'))
+			return false;
+		$table = "balances";
+//		$sort = array('received_time' => -1);
+		$sort = $this->applySort($table);
+		$options = array(
+			'collection' => $table,
+			'sort' => $sort,
+		);
+
+		self::initModel($table, $options);
+		$query = $this->applyFilters($table);
+
+		// this use for export
+		$this->getSetVar($this->getSession($table), $query, 'query', $query);
+
+		$this->getView()->component = $this->buildTableComponent($table, $query);
+	}
+
+	/**
+	 * users controller of admin
+	 */
+	public function usersAction() {
+		if (!$this->allowed('admin'))
+			return false;
+		$table = "users";
+		$options = array(
+			'collection' => $table,
+		);
+
+		self::initModel($table, $options);
+		$query = $this->applyFilters($table);
+
+		$this->getView()->component = $this->buildTableComponent($table, $query);
+	}
+
+	/**
+	 * config controller of admin
+	 */
+	public function operationsAction() {
+		if (!$this->allowed('admin'))
+			return false;
+
+		$this->getView()->component = $this->renderView('operations');
+	}
+
+	/**
+	 * config controller of admin
+	 */
+	public function configAction() {
+		if (!$this->allowed('admin'))
+			return false;
+
+		$model = $this->initModel('config');
+		$configData = $model->getConfig();
+
+		$viewData = array(
+			'data' => $configData,
+			'options' => $model->getOptions(),
+		);
+		$this->getView()->component = $this->renderView('config', $viewData);
+	}
+
+	/**
+	 * config controller of admin
+	 */
+	public function configsaveAction() {
+		if (!$this->allowed('admin'))
+			return false;
+		// get model cofig
+		$model = $this->initModel('config');
+		$data = $this->getRequest()->getRequest();
+		$model->setConfig($data);
+		$this->forceRedirect('/admin/config');
+	}
+
+	protected function forceRedirect($uri) {
+		if (empty($uri)) {
+			$uri = '/';
+		}
+		header('Location: ' . $uri);
+		exit();
 	}
 
 	/**
@@ -352,10 +649,10 @@ class AdminController extends Yaf_Controller_Abstract {
 	 */
 	protected function getTableViewParams($filter_query = array(), $skip = null, $size = null) {
 		if (isset($skip) && !empty($size)) {
-			$data = $this->model->getData($filter_query, $skip, $size);
-		} else {
-			$data = $this->model->getData($filter_query);
+			$this->model->setSize($size);
+			$this->model->setPage($skip);
 		}
+		$data = $this->model->getData($filter_query);
 		$columns = $this->model->getTableColumns();
 		$edit_key = $this->model->getEditKey();
 		$pagination = $this->model->printPager();
@@ -374,12 +671,12 @@ class AdminController extends Yaf_Controller_Abstract {
 	}
 
 	protected function createFilterToolbar() {
-		$params['filter_fields'] = $this->model->getFilterFields();
-		$params['filter_fields_order'] = $this->model->getFilterFieldsOrder();
-		$params['sort_fields'] = $this->model->getSortElements();
-		$params['extra_columns'] = $this->model->getExtraColumns();
-
-		return $params;
+		return array(
+			'filter_fields' => $this->model->getFilterFields(),
+			'filter_fields_order' => $this->model->getFilterFieldsOrder(),
+			'sort_fields' => $this->model->getSortElements(),
+			'extra_columns' => $this->model->getExtraColumns(),
+		);
 	}
 
 	// choose columns
@@ -398,7 +695,7 @@ class AdminController extends Yaf_Controller_Abstract {
 	 * @return string the render layout including the page (component)
 	 */
 	protected function render($tpl, array $parameters = array()) {
-		if ($tpl == 'edit' || $tpl == 'confirm' || $tpl == 'logdetails') {
+		if ($tpl == 'edit' || $tpl == 'confirm' || $tpl == 'logdetails' || $tpl == 'wholesaleajax') {
 			return parent::render($tpl, $parameters);
 		}
 		$tpl = 'index';
@@ -413,13 +710,17 @@ class AdminController extends Yaf_Controller_Abstract {
 
 		$parameters['title'] = $this->title;
 		$parameters['baseUrl'] = $this->baseUrl;
+
+		$parameters['css'] = $this->fetchCssFiles();
+		$parameters['js'] = $this->fetchJsFiles();
+
 		return $this->getView()->render($tpl . ".phtml", $parameters);
 	}
 
-	public function getModel($collection_name, $options = array()) {
+	public function initModel($collection_name, $options = array()) {
 		$session = $this->getSession($collection_name);
 		$options['page'] = $this->getSetVar($session, "page", "page", 1);
-		$options['size'] = $this->getSetVar($session, "listSize", "size", 1000);
+		$options['size'] = $this->getSetVar($session, "listSize", "size", Billrun_Factory::config()->getConfigValue('admin_panel.lines.limit', 100));
 		$options['extra_columns'] = $this->getSetVar($session, "extra_columns", "extra_columns", array());
 
 		if (is_null($this->model)) {
@@ -433,15 +734,16 @@ class AdminController extends Yaf_Controller_Abstract {
 		return $this->model;
 	}
 
-	protected function buildComponent($table, $filter_query, $options = array()) {
+	protected function buildTableComponent($table, $filter_query, $options = array()) {
 		$this->title = ucfirst($table);
 
 		// TODO: use ready pager/paginiation class (zend? joomla?) with auto print
-		$params = array(
+		$basic_params = array(
 			'title' => $this->title,
+			'active' => $table,
 			'session' => $this->getSession($table),
 		);
-		$params = array_merge($options, $params, $this->getTableViewParams($filter_query), $this->createFilterToolbar($table));
+		$params = array_merge($options, $basic_params, $this->getTableViewParams($filter_query), $this->createFilterToolbar($table));
 
 		$ret = $this->renderView('table', $params);
 		return $ret;
@@ -518,8 +820,7 @@ class AdminController extends Yaf_Controller_Abstract {
 		if ($sort_by) {
 			$order = $this->getSetVar($session, 'order', 'order', 'asc') == 'asc' ? 1 : -1;
 			$sort = array($sort_by => $order);
-		}
-		else {
+		} else {
 			$sort = array();
 		}
 		return $sort;
@@ -529,14 +830,34 @@ class AdminController extends Yaf_Controller_Abstract {
 		$query = false;
 		$session = $this->getSession($table);
 		$keys = $this->getSetVar($session, 'manual_key', 'manual_key');
-		$types = Admin_Lines::getOptions();
+		if ($this->model instanceof LinesModel) {
+			$advanced_options = Admin_Lines::getOptions();
+		} else if ($this->model instanceof BalancesModel) {
+			// TODO: make refactoring of the advanced options for each page (lines, balances, etc)
+			$advanced_options = array(
+				$keys[0] => array(
+					'type' => 'number',
+					'display' => 'usage',
+				)
+			);
+		} else if ($this->model instanceof EventsModel) {
+			$avanced_options = array(
+				$keys[0] => array(
+					'type' => 'text',
+				)
+			);
+		} else {
+			return $query;
+		}
 		$operators = $this->getSetVar($session, 'manual_operator', 'manual_operator');
 		$values = $this->getSetVar($session, 'manual_value', 'manual_value');
+		settype($operators, 'array');
+		settype($values, 'array');
 		for ($i = 0; $i < count($keys); $i++) {
 			if ($keys[$i] == '' || $values[$i] == '') {
 				continue;
 			}
-			switch ($types[$keys[$i]]) {
+			switch ($advanced_options[$keys[$i]]['type']) {
 				case 'number':
 					$values[$i] = floatval($values[$i]);
 					break;
@@ -548,6 +869,9 @@ class AdminController extends Yaf_Controller_Abstract {
 					}
 				default:
 					break;
+			}
+			if (isset($advanced_options[$keys[$i]]['case'])) {
+				$values[$i] = Admin_Table::convertValueByCaseType($values[$i], $advanced_options[$keys[$i]]['case']);
 			}
 			// TODO: decoupling to config of fields
 			switch ($operators[$i]) {
@@ -585,9 +909,134 @@ class AdminController extends Yaf_Controller_Abstract {
 				default:
 					break;
 			}
+			if ($advanced_options[$keys[$i]]['type'] == 'dbref') {
+				$collection = Billrun_Factory::db()->{$advanced_options[$keys[$i]]['collection'] . "Collection"}();
+				$pre_query[$advanced_options[$keys[$i]]['collection_key']][$operators[$i]] = $values[$i];
+				$cursor = $collection->query($pre_query);
+				$values [$i] = array();
+				foreach ($cursor as $entity) {
+					$values[$i][] = $entity->createRef($collection);
+				}
+				$operators[$i] = '$in';
+			}
 			$query[$keys[$i]][$operators[$i]] = $values[$i];
 		}
 		return $query;
+	}
+
+	public function logoutAction() {
+		Billrun_Factory::auth()->clearIdentity();
+		$session = Yaf_Session::getInstance();
+		foreach ($session as $k => $v) {
+			unset($session[$k]);
+		}
+
+		$this->forceRedirect('/admin/login');
+	}
+
+	/**
+	 * method to export rates to csv
+	 * 
+	 * @return null; directly export to client
+	 * 
+	 * @todo refactoring with model csv export
+	 */
+	public function exportratesAction() {
+		if (!$this->allowed('read'))
+			return false;
+		$table = "rates";
+		$sort = $this->applySort($table);
+		$options = array(
+			'collection' => $table,
+			'sort' => $sort,
+		);
+
+		self::initModel($table, $options);
+		$query = $this->applyFilters($table);
+
+		$rates = $this->model->getRates($query);
+
+
+		$showprefix = $_GET['show_prefix'];
+		$show_prefix = $showprefix == 'true' ? true : false;
+		$header = $this->model->getPricesListFileHeader($show_prefix);
+		$data_output[] = implode(",", $header);
+		foreach ($rates as $rate) {
+			$rules = $this->model->getRulesByRate($rate, $show_prefix);
+			foreach ($rules as $rule) {
+				$imploded_text = '';
+				foreach ($header as $title) {
+					$imploded_text.=$rule[$title] . ',';
+				}
+				$data_output[] = substr($imploded_text, 0, strlen($imploded_text) - 1);
+			}
+		}
+
+		$output = implode(PHP_EOL, $data_output);
+		header("Cache-Control: max-age=0");
+		header("Content-type: application/csv");
+		header("Content-Disposition: attachment; filename=export_rates.csv");
+		die($output);
+	}
+
+	public function wholesaleAction() {
+		if (!$this->allowed('reports'))
+			return false;
+		$this->addJs('//www.google.com/jsapi');
+		$this->addJs('/js/graphs.js');
+		$this->addJs('/js/jquery.stickytableheaders.min.js');
+		$table = 'wholesale';
+		$group_by = $this->getSetVar($this->getSession($table), 'group_by', 'group_by', 'dayofmonth');
+		$from_day = $this->getSetVar($this->getSession($table), 'from_day', 'from_day', (new Zend_Date(strtotime('60 days ago'), null, new Zend_Locale('he_IL')))->toString('YYYY-MM-dd'));
+		$to_day = $this->getSetVar($this->getSession($table), 'to_day', 'to_day', (new Zend_Date(time(), null, new Zend_Locale('he_IL')))->toString('YYYY-MM-dd'));
+		$model = new WholesaleModel();
+		$viewData = array(
+			'data' => $model->getStats($group_by, $from_day, $to_day),
+			'group_fields' => $model->getGroupFields(),
+			'filter_fields' => $model->getFilterFields(),
+			'session' => $this->getSession($table),
+			'group_by' => $group_by,
+			'tbl_params' => $model->getTblParams(),
+			'retail_data' => $model->getRetailData($from_day, $to_day),
+			'retail_tbl_params' => $model->getRetailTableParams(),
+			'common_columns' => $model->getCommonColumns(),
+			'baseUrl' => $this->baseUrl,
+		);
+		$this->getView()->component = $this->renderView($table, $viewData);
+	}
+
+	public function wholesaleAjaxAction() {
+		if (!$this->authorized('reports'))
+			return false;
+		$group_by = $this->getRequest()->get('group_by');
+		$direction = $this->getRequest()->get('direction');
+		$carrier = $this->getRequest()->get('carrier');
+		$from_day = $this->getRequest()->get('from_day');
+		$to_day = $this->getRequest()->get('to_day');
+		$model = new WholesaleModel();
+		$report_type = $this->getReportTypeByDirection($direction);
+		if ($report_type == 'nr') {
+			$data = $model->getNrStats($group_by, $from_day, $to_day, $carrier);
+		} else {
+			$data = $model->getStats($group_by, $from_day, $to_day, $report_type, $carrier);
+		}
+		$this->getView()->data = $data;
+		$this->getView()->carrier = $carrier;
+		$this->getView()->group_by = $group_by;
+		$this->getView()->group_by_display = $model->getGroupFields()['group_by']['values'][$group_by]['display'];
+		$this->getView()->from_day = $from_day;
+		$this->getView()->tbl_params = $model->getTblParams($report_type);
+	}
+
+	protected function getReportTypeByDirection($direction) {
+		switch ($direction) {
+			case 'TG':
+				return 'incoming_call';
+			case 'FG':
+				return 'outgoing_call';
+			default:
+				return 'nr';
+		}
 	}
 
 }

@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -93,7 +93,7 @@ class Billrun_Calculator_Ilds extends Billrun_Calculator_Rate {
 	 * Write the calculation into DB
 	 */
 	public function updateRow($row) {
-		Billrun_Factory::dispatcher()->trigger('beforeCalculatorWriteRow', array($row, $this));
+		Billrun_Factory::dispatcher()->trigger('beforeCalculatorUpdateRow', array($row, $this));
 
 		$current = $row->getRawData();
 		$charge = $this->calcChargeLine($row->get('type'), $row->get('call_charge'));
@@ -104,8 +104,8 @@ class Billrun_Calculator_Ilds extends Billrun_Calculator_Rate {
 		$newData = array_merge($current, $added_values);
 		$row->setRawData($newData);
 
-		Billrun_Factory::dispatcher()->trigger('afterCalculatorWriteRow', array($row, $this));
-		return true;
+		Billrun_Factory::dispatcher()->trigger('afterCalculatorUpdateRow', array($row, $this));
+		return $row;
 	}
 
 	/**

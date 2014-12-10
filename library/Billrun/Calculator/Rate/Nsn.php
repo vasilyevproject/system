@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -24,31 +24,6 @@ class Billrun_Calculator_Rate_Nsn extends Billrun_Calculator_Rate {
 	public function __construct($options = array()) {
 		parent::__construct($options);
 		$this->loadRates();
-	}
-
-	/**
-	 * Write the calculation into DB
-	 */
-	public function updateRow($row) {
-		Billrun_Factory::dispatcher()->trigger('beforeCalculatorWriteRow', array($row, $this));
-		$usage_type = $this->getLineUsageType($row);
-		$volume = $this->getLineVolume($row, $usage_type);
-		$rate = $this->getLineRate($row, $usage_type);
-		if (isset($rate['key']) && $rate['key'] == "UNRATED") {
-			return false;
-		}
-		$current = $row->getRawData();
-
-		$added_values = array(
-			'usaget' => $usage_type,
-			'usagev' => $volume,
-			$this->ratingField => $rate ? $rate->createRef() : $rate,
-		);
-		$newData = array_merge($current, $added_values);
-		$row->setRawData($newData);
-
-		Billrun_Factory::dispatcher()->trigger('afterCalculatorWriteRow', array($row, $this));
-		return true;
 	}
 
 	/**
@@ -107,8 +82,6 @@ class Billrun_Calculator_Rate_Nsn extends Billrun_Calculator_Rate {
 		} else if ($record_type == '30' && isset($row['ild_prefix'])) {
 			$called_number = preg_replace('/^016/', '', $called_number);
 			$matchedRate = $this->getRateByParams($called_number, $usage_type, $line_time);
-		} else {
-			$matchedRate = false;
 		}
 
 		return $matchedRate;
@@ -124,11 +97,11 @@ class Billrun_Calculator_Rate_Nsn extends Billrun_Calculator_Rate {
 	 */
 	protected function getRateByParams($called_number, $usage_type, $urt, $ocg = null) {
 		$matchedRate = $this->rates['UNRATED'];
-		$called_number_prefixes = $this->getPrefixes($called_number);
+		$called_number_prefixes = Billrun_Util::getPrefixes($called_number);
 		foreach ($called_number_prefixes as $prefix) {
 			if (isset($this->rates[$prefix])) {
 				foreach ($this->rates[$prefix] as $rate) {
-					if (isset($rate['rates'][$usage_type])) {
+					if (isset($rate['rates'][$usage_type]) && (!isset($rate['params']['fullEqual']) || $prefix == $called_number)) {
 						if ($rate['from'] <= $urt && $rate['to'] >= $urt) {
 							if (is_null($ocg)) {
 								$matchedRate = $rate;

@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -244,7 +244,7 @@ class RPCCheckerController extends Yaf_Controller_Abstract {
 		foreach ($this->cases as $case) {
 			$data = $subscriber->getList(0, 1, $case['date'], $case['account_id']);
 			if (!$this->checkOutput($case, $data)) {
-				echo 'Wrong output for ' . $case['account_id'] . ', ' . $case['date'] . ".</br>Expected output:</br>" . json_encode($case) . "</br></br>";
+				echo 'Wrong output for ' . $case['account_id'] . ', ' . $case['date'] . ".<br />Expected output:<br />" . json_encode($case) . "<br /><br />";
 			}
 		}
 		echo "Finished";

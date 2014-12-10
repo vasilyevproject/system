@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -61,7 +61,7 @@ class Billrun_Generator_Ilds extends Billrun_Generator {
 	 * load the container the need to be generate
 	 */
 	public function load() {
-		$billrun = Billrun_Factory::db()->billrunCollection();
+		$billrun = Billrun_Factory::db(array('name' => 'billrun'))->billrunCollection();
 
 		$this->data = $billrun->query()
 			->equals('stamp', $this->getStamp())
@@ -206,7 +206,7 @@ class Billrun_Generator_Ilds extends Billrun_Generator {
 	}
 
 	protected function saveInvoiceId($aid, $invoice_id) {
-		$billrun = Billrun_Factory::db()->billrunCollection();
+		$billrun = Billrun_Factory::db(array('name' => 'billrun'))->billrunCollection();
 
 		$resource = $billrun->query()
 			->equals('stamp', $this->getStamp())
@@ -229,7 +229,7 @@ class Billrun_Generator_Ilds extends Billrun_Generator {
 	}
 
 	protected function createInvoiceId() {
-		$invoices = Billrun_Factory::db()->billrunCollection();
+		$invoices = Billrun_Factory::db(array('name' => 'billrun'))->billrunCollection();
 		// @TODO: need to the level of the invoice type
 		$resource = $invoices->query()->cursor()->sort(array('invoice_id' => -1))->limit(1);
 		foreach ($resource as $e) {

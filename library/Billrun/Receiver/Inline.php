@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -71,13 +71,22 @@ class Billrun_Receiver_Inline extends Billrun_Receiver {
 		}
 		$ret = array();
 		Billrun_Factory::log()->log("Billrun_Receiver_Inline::receive - handle file {$this->filename}", Zend_Log::DEBUG);
-		$path = $this->handleFile();
+		$this->lockFileForReceive($this->filename, $type);
+		$path = $this->handleFile();		
 		if (!$path) {
 			Billrun_Factory::log()->log("NOTICE : Couldn't write file $this->filename.", Zend_Log::NOTICE);
 			return FALSE;
-		} else {
-			$this->logDB($path);
-			$ret[] = $path;
+		} else {			
+			$fileData = $this->getFileLogData($this->filename, $type);
+			$fileData['path'] = $path;
+			if(!empty($this->backupPaths)) {
+				$backedTo = $this->backup($fileData['path'], $file->filename, $this->backupPaths, FALSE, FALSE);
+				Billrun_Factory::dispatcher()->trigger('beforeReceiverBackup', array($this, &$fileData['path']));
+				$fileData['backed_to'] = $backedTo;
+				Billrun_Factory::dispatcher()->trigger('afterReceiverBackup', array($this, &$fileData['path']));
+			}			
+			$this->logDB($fileData);
+			$ret[] = $fileData['path'];
 		}
 
 		Billrun_Factory::dispatcher()->trigger('afterInlineFilesReceive', array($this, $ret));

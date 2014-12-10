@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -24,29 +24,6 @@ class Billrun_Calculator_Rate_Credit extends Billrun_Calculator_Rate {
 	public function __construct($options = array()) {
 		parent::__construct($options);
 		$this->loadRates();
-	}
-
-	/**
-	 * Write the calculation into DB
-	 */
-	public function updateRow($row) {
-		Billrun_Factory::dispatcher()->trigger('beforeCalculatorWriteRow', array($row, $this));
-		$usage_type = $this->getLineUsageType($row);
-		$volume = $this->getLineVolume($row, $usage_type);
-		$rate = $this->getLineRate($row, $usage_type);
-
-		$current = $row->getRawData();
-
-		$added_values = array(
-			'usaget' => $usage_type,
-			'usagev' => $volume,
-			$this->ratingField => $rate ? $rate->createRef() : $rate,
-		);
-		$newData = array_merge($current, $added_values);
-		$row->setRawData($newData);
-
-		Billrun_Factory::dispatcher()->trigger('afterCalculatorWriteRow', array($row, $this));
-		return true;
 	}
 
 	/**

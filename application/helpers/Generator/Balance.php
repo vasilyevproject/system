@@ -62,20 +62,23 @@ class Generator_Balance extends Generator_Golanxml {
 		if (!empty($res)) {
 			$this->account_data = current($res);
 		}
-		$previous_billrun_key = Billrun_Util::getPreviousBillrunKey($this->stamp);
-		if (Billrun_Billrun::exists($this->aid, $previous_billrun_key)) {
-			$start_time = 0; // maybe some lines are late (e.g. tap3)
-		} else {
-			$start_time = Billrun_Util::getStartTime($this->stamp); // to avoid getting lines of previous billruns
-		}
+
 		$billrun_params = array(
 			'aid' => $this->aid,
 			'billrun_key' => $this->stamp,
 			'autoload' => false,
 		);
 		$billrun = Billrun_Factory::billrun($billrun_params);
-		$flat_lines = array();
+		$manual_lines = array();
+		$deactivated_subscribers = array();
 		foreach ($this->account_data as $subscriber) {
+			if (!Billrun_Factory::db()->rebalance_queueCollection()->query(array('sid' => $subscriber->sid), array('sid' => 1))
+					->cursor()->current()->isEmpty()) {
+				$subscriber_status = "REBALANCE";
+				$billrun->addSubscriber($subscriber, $subscriber_status);
+				continue;
+			}
+
 			if ($billrun->subscriberExists($subscriber->sid)) {
 				Billrun_Factory::log()->log("Billrun " . $this->stamp . " already exists for subscriber " . $subscriber->sid, Zend_Log::ALERT);
 				continue;
@@ -83,20 +86,37 @@ class Generator_Balance extends Generator_Golanxml {
 			$next_plan_name = $subscriber->getNextPlanName();
 			if (is_null($next_plan_name) || $next_plan_name == "NULL") {
 				$subscriber_status = "closed";
+				$current_plan_name = $subscriber->getCurrentPlanName();
+				if (is_null($current_plan_name) || $current_plan_name == "NULL") {
+
+					$deactivated_subscribers[] = array("sid" => $subscriber->sid);
+				}
 			} else {
 				$subscriber_status = "open";
-				$flat_lines[] = new Mongodloid_Entity($subscriber->getFlatEntry($this->stamp));
+				$flat_entry = $subscriber->getFlatEntry($this->stamp, true);
+				$manual_lines = array_merge($manual_lines, array($flat_entry['stamp'] => $flat_entry));
 			}
+			$manual_lines = array_merge($manual_lines, $subscriber->getCredits($this->stamp, true));
 			$billrun->addSubscriber($subscriber, $subscriber_status);
 		}
-		$this->lines = $billrun->addLines(false, $start_time, $flat_lines);
+//		print_R($manual_lines);die;
+		$this->lines = $billrun->addLines($manual_lines, $deactivated_subscribers);
+		$billrun->filter_disconected_subscribers($deactivated_subscribers);
 
 		$this->data = $billrun->getRawData();
 	}
 
 	public function generate() {
-		$this->writer->openURI('php://output'); 
-		return $this->writeXML($this->data, $this->lines);
+		if ($this->buffer) {
+			$this->writer->openMemory();
+		} else {
+			$this->writer->openURI('php://output');
+		}
+
+		$this->writeXML($this->data, $this->lines);
+		if ($this->buffer) {
+			return $this->writer->outputMemory();
+		}
 	}
 
 	protected function setAccountId($aid) {

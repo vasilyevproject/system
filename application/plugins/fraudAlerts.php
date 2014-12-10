@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -47,7 +47,7 @@ class fraudAlertsPlugin extends Billrun_Plugin_BillrunPluginBase {
 
 		$this->alertTypes = isset($options['alertTypes']) ?
 			$options['alertTypes'] :
-			Billrun_Factory::config()->getConfigValue('fraudAlerts.alert.types', array());
+			Billrun_Factory::config()->getConfigValue('fraudAlerts.alert.types', array('nrtrde', 'ggsn', 'deposit', 'ilds', 'nsn'));
 
 		$this->isDryRun = isset($options['dryRun']) ?
 			$options['dryRun'] :

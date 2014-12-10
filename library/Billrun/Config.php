@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -57,6 +57,28 @@ class Billrun_Config {
 		}
 		return self::$instance;
 	}
+	
+	public function loadDbConfig() {
+		try {
+			$configColl = Billrun_Factory::db()->configCollection();
+			if ($configColl) {
+				$dbConfig = $configColl->query()
+					->cursor()
+					->sort(array('_id' => -1))
+					->limit(1)
+					->current()
+					->getRawData();
+				
+				unset($dbConfig['_id']);
+				$iniConfig = $this->config->toArray();
+				$this->config = new Yaf_Config_Simple(array_merge($iniConfig, $dbConfig));
+			}
+
+		} catch (Exception $e) {
+			Billrun_Factory::log('Cannot load database config', Zend_Log::CRIT);
+			return false;
+		}
+	}
 
 	/**
 	 * method to get config value
@@ -85,7 +107,7 @@ class Billrun_Config {
 			$currConf = $currConf[$key];
 		}
 
-		if ($currConf instanceof Yaf_Config_Ini) {
+		if ($currConf instanceof Yaf_Config_Ini || $currConf instanceof Yaf_Config_Simple) {
 			$currConf = $currConf->toArray();
 		}
 

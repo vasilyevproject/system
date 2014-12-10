@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -19,10 +19,6 @@ class LogModel extends TableModel {
 		$params['collection'] = Billrun_Factory::db()->log;
 		parent::__construct($params);
 		$this->search_key = "stamp";
-	}
-
-	public function toolbar() {
-		return 'log';
 	}
 
 	public function getSortFields() {
@@ -51,21 +47,22 @@ class LogModel extends TableModel {
 		}
 		return $parent_protected;
 	}
-	
+
 	public function getFilterFields() {
 		$filter_fields = array(
 			'type' => array(
 				'key' => 'source',
 				'db_key' => 'source',
-				'input_type' => 'text',
-				'comparison' => 'contains',
+				'input_type' => 'multiselect',
+				'comparison' => '$in',
 				'display' => 'Type',
-				'default' => '',
+				'values' => Billrun_Factory::config()->getConfigValue('admin_panel.log.source'),
+				'default' => array(),
 			),
 		);
 		return array_merge($filter_fields, parent::getFilterFields());
 	}
-	
+
 	public function getFilterFieldsOrder() {
 		$filter_field_order = array(
 			0 => array(

@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -104,21 +104,21 @@ class LinesModel extends TableModel {
 		}
 		parent::update($data);
 	}
+	
+	public function getData($filter_query = array()) {
 
-	public function getData($filter_query = array(), $skip = null, $size = null) {
-		if (empty($skip)) {
-			$skip = $this->offset();
-		}
-		if (empty($size)) {
-			$size = $this->size;
+		$cursor = $this->collection->query($filter_query)->cursor()
+			->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'))
+			->sort($this->sort)->skip($this->offset())->limit($this->size);
+
+		if (isset($filter_query['$and']) && $this->filterExists($filter_query['$and'], array('aid', 'sid', 'stamp'))) {
+			$this->_count = $cursor->count(false);
+		} else {
+			$this->_count = Billrun_Factory::config()->getConfigValue('admin_panel.lines.global_limit', 10000);
 		}
 
-		$limit = Billrun_Factory::config()->getConfigValue('admin_panel.lines.limit', 10000);
-		$cursor = $this->collection->query($filter_query)->cursor()->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'))->limit($limit);
-		$this->_count = $cursor->count();
-		$resource = $cursor->sort($this->sort)->skip($skip)->limit($size);
 		$ret = array();
-		foreach ($resource as $item) {
+		foreach ($cursor as $item) {
 			$item->collection($this->lines_coll);
 			if ($arate = $this->getDBRefField($item, 'arate')) {
 				$item['arate'] = $arate['key'];
@@ -130,17 +130,57 @@ class LinesModel extends TableModel {
 		}
 		return $ret;
 	}
+	
+	/**
+	 * method to get data aggregated
+	 * 
+	 * @param array $filter_query what to filter by
+	 * @param array $aggregate what to aggregate by
+	 * 
+	 * @return array of result
+	 */
+	public function getDataAggregated($filter_query = array(), $aggregate = array()) {
+
+		$cursor = $this->collection->aggregatecursor($filter_query, $aggregate);
+
+		if (isset($filter_query['$and']) && $this->filterExists($filter_query['$and'], array('aid', 'sid', 'stamp'))) {
+			$this->_count = $cursor->count(false);
+		} else {
+			$this->_count = Billrun_Factory::config()->getConfigValue('admin_panel.lines.global_limit', 10000);
+		}
+
+		$ret = array();
+		foreach ($cursor as $item) {
+//			$item->collection($this->lines_coll);
+//			if ($arate = $this->getDBRefField($item, 'arate')) {
+//				$item['arate'] = $arate['key'];
+//				$item['arate_id'] = strval($arate['_id']);
+//			} else {
+//				$item['arate'] = $arate;
+//			}
+			$ret[] = $item;
+		}
+		return $ret;
+	}
+
+	
+	public function getDistinctField($field, $filter_query = array()) {
+		if (empty($field) || empty($filter_query)) {
+			return array();
+		}
+		return $this->collection->distinct($field, $filter_query);
+	}
 
 	public function getTableColumns() {
 		$columns = array(
 			'type' => 'Type',
-			'aid' => 'Account id',
-			'sid' => 'Subscriber id',
-			'calling_number' => 'Calling Number',
-			'called_number' => 'Called Number',
+			'aid' => 'Account',
+			'sid' => 'Subscriber',
+			'calling_number' => 'Calling',
+			'called_number' => 'Called',
 			'plan' => 'Plan',
-			'usaget' => 'Usage type',
-			'usagev' => 'Usage volume',
+			'usaget' => 'Usage',
+			'usagev' => 'Volume',
 			'arate' => 'Rate',
 			'aprice' => 'Charge',
 			'billrun' => 'Billrun',
@@ -153,25 +193,21 @@ class LinesModel extends TableModel {
 		return $columns;
 	}
 
-	public function toolbar() {
-		return 'events';
-	}
-
 	public function getFilterFields() {
-		$months = 6;
-		$previous_billruns = array();
+		$months = 12;
+		$billruns = array();
 		$timestamp = time();
-		for ($i = 1; $i <= $months; $i++) {
-			$timestamp = strtotime("1 month ago", $timestamp);
+		for ($i = 0; $i < $months; $i++) {
 			$billrun_key = Billrun_Util::getBillrunKey($timestamp);
 			if ($billrun_key >= '201401') {
-				$previous_billruns[$billrun_key] = $billrun_key;
+				$billruns[$billrun_key] = $billrun_key;
 			}
+			else {
+				break;
+			}
+			$timestamp = strtotime("1 month ago", $timestamp);
 		}
-		arsort($previous_billruns);
-		$current_billrun_key = '000000';
-		$current_billrun = array($current_billrun_key => 'Current billrun');
-		$billruns = $current_billrun + $previous_billruns;
+		arsort($billruns);
 
 		$filter_fields = array(
 			'aid' => array(
@@ -196,7 +232,7 @@ class LinesModel extends TableModel {
 				'input_type' => 'date',
 				'comparison' => '$gte',
 				'display' => 'From',
-				'default' => (new Zend_Date(strtotime('2013-01-01'), null, new Zend_Locale('he_IL')))->toString('YYYY-MM-dd HH:mm:ss'),
+				'default' => (new Zend_Date(strtotime('2 months ago'), null, new Zend_Locale('he_IL')))->toString('YYYY-MM-dd HH:mm:ss'),
 			),
 			'to' => array(
 				'key' => 'to',
@@ -222,7 +258,7 @@ class LinesModel extends TableModel {
 				'comparison' => '$in',
 				'display' => 'Billrun',
 				'values' => $billruns,
-				'default' => $current_billrun_key,
+				'default' => array(),
 			),
 		);
 		return array_merge($filter_fields, parent::getFilterFields());
@@ -299,12 +335,90 @@ class LinesModel extends TableModel {
 			'billrun_key' => 'Billrun',
 			'aprice' => 'Charge',
 			'plan' => 'Plan',
+			'process_time' => 'Process time',
 			'sid' => 'Subscriber id',
 			'urt' => 'Time',
 			'type' => 'Type',
 			'usaget' => 'Usage type',
 			'usagev' => 'Usage volume',
 		);
+	}
+
+	protected function formatCsvCell($row, $header) {
+		if (($header == 'from' || $header == 'to' || $header == 'urt' || $header == 'notify_time') && $row) {
+			if (!empty($row["tzoffset"])) {
+				// TODO change this to regex; move it to utils
+				$tzoffset = $row['tzoffset'];
+				$sign = substr($tzoffset, 0, 1);
+				$hours = substr($tzoffset, 1, 2);
+				$minutes = substr($tzoffset, 3, 2);
+				$time = $hours . ' hours ' . $minutes . ' minutes';
+				if ($sign == "-") {
+					$time .= ' ago';
+				}
+				$timsetamp = strtotime($time, $row['urt']->sec);
+				$zend_date = new Zend_Date($timsetamp);
+				$zend_date->setTimezone('UTC');
+				return $zend_date->toString("d/M/Y H:m:s") . $row['tzoffset'];
+			} else {
+				$zend_date = new Zend_Date($row[$header]->sec);
+				return $zend_date->toString("d/M/Y H:m:s");
+			}
+		} else {
+			return parent::formatCsvCell($row, $header);
+		}
+
+	}
+	
+	public function getActivity($sids, $from_date, $to_date, $include_outgoing, $include_incoming, $include_sms) {
+		if (!is_array($sids)) {
+			settype($sids, 'array');
+		}
+		$query = array(
+			'sid' => array(
+				'$in' => $sids,
+			),
+			'usaget' => array('$in' => array()),
+		);
+		
+		if ($include_incoming) {
+			$query['usaget']['$in'][] = 'incoming_call';
+		}
+		
+		if ($include_outgoing) {
+			$query['usaget']['$in'][] = 'call';
+		}
+		
+		if ($include_sms) {
+			$query['usaget']['$in'][] = 'sms';
+		}
+		
+		$query['urt'] = array(
+			'$lte' => new MongoDate($to_date),
+			'$gte' => new MongoDate($from_date),
+		);
+
+		$cursor = $this->collection->query($query)->cursor()->limit(100000)->sort(array('urt' => 1));
+		$ret = array();
+		
+		foreach($cursor as $row) {
+			$ret[] = array(
+				'date' => date(Billrun_Base::base_dateformat, $row['urt']->sec),
+				'called_number' => $row['called_number'],
+				'calling_number' => $row['calling_number'],
+				'usagev' => $row['usagev'],
+				'usaget' => $row['usaget'],
+			);
+		}
+		
+		return $ret;
+
+	}
+	
+	public function remove($params) {
+		// first remove line from queue (collection) than from lines collection (parent)
+		Billrun_Factory::db()->queueCollection()->remove($params);
+		return parent::remove($params);
 	}
 
 }

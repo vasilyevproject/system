@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -14,19 +14,13 @@
  */
 class Billrun_Billrun {
 
+	static public $accountsLines = array();
 	protected $aid;
 	protected $billrun_key;
 	protected $data;
 	protected static $runtime_billrun_key;
-	protected static $live_update;
 	protected static $vatAtDates = array();
 	protected static $vatsByBillrun = array();
-
-	/**
-	 * @var int allow billrun to recompute marked line (as long as they have the same billrun_key)
-	 */
-	protected $allowOverride = 0;
-	protected $updateStampChunk = 100000;
 
 	/**
 	 * lines collection
@@ -48,11 +42,19 @@ class Billrun_Billrun {
 	static protected $plans = array();
 
 	/**
+	 * billrun collection
+	 * @var Mongodloid_Collection 
+	 */
+	protected $billrun_coll = null;
+
+	/**
 	 * 
 	 * @param type $options
 	 * @todo used only in current balance API. Needs refactoring
 	 */
 	public function __construct($options = array()) {
+		$this->lines = Billrun_Factory::db()->linesCollection();
+		$this->billrun_coll = Billrun_Factory::db(array('name' => 'billrun'))->billrunCollection();
 		$this->vat = Billrun_Factory::config()->getConfigValue('pricing.vat', 0.18);
 		if (isset($options['aid']) && isset($options['billrun_key'])) {
 			$this->aid = $options['aid'];
@@ -61,25 +63,21 @@ class Billrun_Billrun {
 				if (isset($options['data']) && !$options['data']->isEmpty()) {
 					$this->data = $options['data'];
 				} else {
-					$this->resetBillrun($this->aid, $this->billrun_key);
+					$this->resetBillrun();
 				}
 			} else {
 				$this->load();
+				if ($this->data->isEmpty()) {
+					$this->resetBillrun();
+				}
 			}
-			$this->data->collection(Billrun_Factory::db()->billrunCollection());
+			$this->data->collection($this->billrun_coll);
 		} else {
 			Billrun_Factory::log()->log("Returning an empty billrun!", Zend_Log::NOTICE);
-		}
-		if (isset($options['allow_override'])) {
-			$this->allowOverride = (int) $options['allow_override'];
-		}
-		if (isset($options['update_stamps_chunk'])) {
-			$this->updateStampChunk = (int) $options['update_stamps_chunk'];
 		}
 		if (isset($options['filter_fields'])) {
 			$this->filter_fields = array_map("intval", $options['filter_fields']);
 		}
-		$this->lines = Billrun_Factory::db()->linesCollection();
 	}
 
 	/**
@@ -87,13 +85,12 @@ class Billrun_Billrun {
 	 * @return Billrun_Billrun
 	 */
 	protected function load() {
-		$billrun_coll = Billrun_Factory::db()->billrunCollection();
-		$this->data = $billrun_coll->query(array(
-							'aid' => $this->aid,
-							'billrun_key' => $this->billrun_key,
-						))
-						->cursor()->limit(1)->current();
-		$this->data->collection($billrun_coll);
+		$this->data = $this->billrun_coll->query(array(
+					'aid' => $this->aid,
+					'billrun_key' => $this->billrun_key,
+				))
+				->cursor()->limit(1)->current();
+		$this->data->collection($this->billrun_coll);
 		return $this;
 	}
 
@@ -105,7 +102,7 @@ class Billrun_Billrun {
 	public function save() {
 		if (isset($this->data)) {
 			try {
-				$this->data->save();
+				$this->data->save(NULL, 1);
 				return true;
 			} catch (Exception $ex) {
 				Billrun_Factory::log()->log('Error saving billrun document. Error code: ' . $ex->getCode() . '. Message: ' . $ex->getMessage(), Zend_Log::ERR);
@@ -139,7 +136,10 @@ class Billrun_Billrun {
 		$subscriber_entry['subscriber_status'] = $status;
 		$subscriber_entry['current_plan'] = $current_plan_ref;
 		$subscriber_entry['next_plan'] = $next_plan_ref;
-		foreach ($subscriber->getExtraFieldsForBillrun() as $field) {
+		foreach ($subscriber->getExtraFieldsForBillrun() as $field => $save) {
+			if ($field == !$save) {
+				continue;
+			}
 			$subscriber_entry[$field] = $subscriber->{$field};
 		}
 		$subscribers[] = $subscriber_entry;
@@ -157,18 +157,35 @@ class Billrun_Billrun {
 	}
 
 	/**
+	 * filter out subscribers that have no plans and no lines
+	 * @param int $sid the  subscriber id to check.
+	 * @return boolean TRUE if the subscriber exists in the current billrun entry, FALSE otherwise.
+	 */
+	public function filter_disconected_subscribers($deactivated_subscribers) {
+		$subscribers = $this->data['subs'];
+		foreach ($subscribers as $key => $sub) {
+			foreach ($deactivated_subscribers as $ds) {
+				if ($ds['sid'] == $sub['sid']) {
+					unset($subscribers[$key]);
+				}
+			}
+		}
+		$this->data['subs'] = array_values($subscribers);
+	}
+
+	/**
 	 * Checks if a billrun document exists in the db
 	 * @param int $aid the account id
 	 * @param string $billrun_key the billrun key
 	 * @return boolean true if yes, false otherwise
 	 */
 	public static function exists($aid, $billrun_key) {
-		$billrun_coll = Billrun_Factory::db()->billrunCollection();
+		$billrun_coll = Billrun_Factory::db(array('name' => 'billrun'))->billrunCollection();
 		$data = $billrun_coll->query(array(
-							'aid' => $aid,
-							'billrun_key' => $billrun_key,
-						))
-						->cursor()->limit(1)->current();
+					'aid' => (int) $aid,
+					'billrun_key' => (string) $billrun_key,
+				))
+				->cursor()->limit(1)->current();
 		return !$data->isEmpty();
 	}
 
@@ -298,6 +315,9 @@ class Billrun_Billrun {
 		if ($row['type'] == 'credit') {
 			$plan_key = 'credit';
 			$zone_key = $row['service_name'];
+		} else if ($row['type'] == 'service') {
+			$plan_key = 'service';
+			$zone_key = $row['key'];
 		} else if (!isset($pricingData['over_plan']) && !isset($pricingData['out_plan'])) { // in plan
 			$plan_key = 'in_plan';
 			if ($row['type'] == 'flat') {
@@ -390,6 +410,8 @@ class Billrun_Billrun {
 				return 'flat';
 			case 'credit':
 				return 'credit';
+			case 'service':
+				return 'service';
 			default:
 				return 'call';
 		}
@@ -427,6 +449,12 @@ class Billrun_Billrun {
 				$sraw['costs']['credit'][$row['credit_type']][$vat_key] = $pricingData['aprice'];
 			} else {
 				$sraw['costs']['credit'][$row['credit_type']][$vat_key] += $pricingData['aprice'];
+			}
+		} else if ($row['type'] == 'service') {
+			if (!isset($sraw['costs']['service'][$vat_key])) {
+				$sraw['costs']['service'][$vat_key] = $pricingData['aprice'];
+			} else {
+				$sraw['costs']['service'][$vat_key] += $pricingData['aprice'];
 			}
 		}
 	}
@@ -469,8 +497,14 @@ class Billrun_Billrun {
 		} else {
 			$zone += $pricingData['aprice'];
 		}
-		if (self::isLiveUpdate()) {
-			$sraw['lines'][$usage_type]['refs'][] = $row->createRef();
+		if (isset($row['arategroup'])) {
+			if (isset($row['in_plan'])) {
+				$sraw['groups'][$row['arategroup']]['in_plan']['totals'][key($counters)]['usagev'] = $this->getFieldVal($sraw['groups'][$row['arategroup']]['in_plan']['totals'][key($counters)]['usagev'], 0) + $row['in_plan'];
+			}
+			if (isset($row['over_plan'])) {
+				$sraw['groups'][$row['arategroup']]['over_plan']['totals'][key($counters)]['usagev'] = $this->getFieldVal($sraw['groups'][$row['arategroup']]['over_plan']['totals'][key($counters)]['usagev'], 0) + $row['over_plan'];
+				$sraw['groups'][$row['arategroup']]['over_plan']['totals'][key($counters)]['cost'] = $this->getFieldVal($sraw['groups'][$row['arategroup']]['over_plan']['totals'][key($counters)]['cost'], 0) + $row['aprice'];
+			}
 		}
 		if ($usage_type == 'data' && $row['type'] != 'tap3') {
 			$date_key = date("Ymd", $row['urt']->sec);
@@ -628,31 +662,16 @@ class Billrun_Billrun {
 	 * @param int $start_time lower bound date to get lines from. A unix timestamp 
 	 * @return array the stamps of the lines used to create the billrun
 	 */
-	public function addLines($update_lines = false, $start_time = 0, $flat_lines = array()) {
+	public function addLines($manual_lines = array(), &$deactivated_subscribers = array()) {
 		Billrun_Factory::log()->log("Querying account " . $this->aid . " for lines...", Zend_Log::INFO);
-		$account_lines = $this->getAccountLines($this->aid, $start_time, false);
-//		Billrun_Factory::log()->log("Found " . count($account_lines) . " lines.", Zend_Log::DEBUG);
+		$account_lines = $this->getAccountLines($this->aid);
+
+		$this->filterSubscribers($account_lines, $deactivated_subscribers);
 		Billrun_Factory::log("Processing account Lines $this->aid", Zend_Log::INFO);
-		$updatedLines = array_merge($this->processLines($account_lines), $this->processLines($flat_lines));
-		$updateLinesStamps = array_keys($updatedLines);
+
+		$lines = array_merge($account_lines, $manual_lines);
+		$updatedLines = $this->processLines(array_values($lines));
 		Billrun_Factory::log("Finished processing account $this->aid lines. Total: " . count($updatedLines), Zend_log::INFO);
-//		Billrun_Factory::log()->log("Querying subscriber " . $sid . " for ggsn lines...", Zend_Log::DEBUG);
-//		$subscriber_aggregated_data = $this->getSubscriberDataLines($sid, $start_time);
-//		Billrun_Factory::log()->log("Finished querying subscriber " . $sid . " for ggsn lines", Zend_Log::DEBUG);
-//		Billrun_Factory::log("Processing data lines for subscriber $sid", Zend_Log::DEBUG);
-//		$data_lines_stamps = $this->updateAggregatedData($sid, $subscriber_aggregated_data);
-//		Billrun_Factory::log("Finished processing data lines for subscriber $sid", Zend_Log::DEBUG);
-		if ($update_lines) {
-			Billrun_Factory::log("Updating account $this->aid lines with billrun stamp", Zend_Log::INFO);
-//			$updatedLines = array_merge($updatedLines, $data_lines_stamps);
-			asort($updateLinesStamps);
-			$offset = 0;
-			while (count($stamps_chunk = array_slice($updateLinesStamps, $offset, $this->updateStampChunk))) {
-				$this->lines->update(array('stamp' => array('$in' => $stamps_chunk)), array('$set' => array('billrun' => $this->billrun_key)), array('multiple' => true));
-				$offset += $this->updateStampChunk;
-			}
-			Billrun_Factory::log("Finished updating account $this->aid lines with billrun stamp", Zend_Log::INFO);
-		}
 		$this->updateTotals();
 		return $updatedLines;
 	}
@@ -660,7 +679,10 @@ class Billrun_Billrun {
 	protected function processLines($account_lines) {
 		$updatedLines = array();
 		foreach ($account_lines as $line) {
-			if (isset($updatedLines[$line['stamp']])) { // temporary fix for https://jira.mongodb.org/browse/SERVER-9858
+			// the check fix 2 issues:
+			// 1. temporary fix for https://jira.mongodb.org/browse/SERVER-9858
+			// 2. avoid duplicate lines
+			if (isset($updatedLines[$line['stamp']])) {
 				continue;
 			}
 			$line->collection($this->lines);
@@ -686,90 +708,174 @@ class Billrun_Billrun {
 	}
 
 	/**
+	 * removes deactivated accounts from the list if they still have lines (and therfore should be in the billrun)
+	 * @param $deactivated_subscribers array of subscribers sids and their deactivation date
+	 */
+	protected function filterSubscribers($account_lines, &$deactivated_subscribers) {
+		if (empty($deactivated_subscribers) || empty($account_lines)) {
+			return;
+		}
+		foreach ($account_lines as $line) {
+			foreach ($deactivated_subscribers as $key => $ds) {
+				if ($ds['sid'] == $line['sid']) {
+					Billrun_Factory::log()->log("Subscriber " . $ds['sid'] . " has current plan null and next plan null, yet has lines", Zend_Log::NOTICE);
+					unset($deactivated_subscribers[$key]);
+				}
+			}
+		}
+	}
+
+	/**
 	 * Gets all the account lines for this billrun from the db
 	 * @param int $aid the account id
-	 * @param int $start_time lower bound date to get lines from. A unix timestamp
+	 * @param array $excluded_stamps exclude lines with these stamps from the search
 	 * @return Mongodloid_Cursor the mongo cursor used to iterate over the lines
 	 * @todo remove aid parameter
 	 */
-	protected function getAccountLines($aid, $start_time = 0, $include_flats = true) {
-		$start_time = new MongoDate($start_time);
-		$end_time = new MongoDate(Billrun_Util::getEndTime($this->billrun_key));
-		$query = array(
-			'aid' => $aid,
-			'urt' => array(
-				'$lte' => $end_time,
-				'$gte' => $start_time, // needed for current balance
-			),
-//			'aprice' => array(
-//				'$exists' => true,
-//			),
-//			'type' => array(
-//				'$ne' => 'ggsn',
-//			),
-		);
-		if (!$include_flats) {
-			$query['type'] = array(
-				'$ne' => 'flat',
-			);
-		}
-		if ($this->allowOverride == 1) {
-			$query['billrun']['$in'] = array('000000', $this->billrun_key);
-		} else if ($this->allowOverride == 2) {
-			$query['billrun'] = $this->billrun_key;
+	protected function getAccountLines($aid) {
+		if (!isset(static::$accountsLines[$aid])) {
+			$ret = $this->loadAccountsLines(array($aid), $this->billrun_key, $this->filter_fields);
 		} else {
-			$query['billrun'] = '000000';
+			$ret = &static::$accountsLines;
 		}
 
+		return isset($ret[$aid]) ? $ret[$aid] : array();
+	}
 
-		$hint = array(
-			'aid' => 1,
-			'urt' => 1,
+	/**
+	 *  preload  and saves accounts lines to a static structure.
+	 * @param type $aids the account to get the lines for.
+	 * @param type $billrun_key the billrun key  that the lines should be in.
+	 * @param type $filter_fields the fileds that the returned lines need to have.
+	 * @param array $excluded_stamps stamps excluded from the search
+	 */
+	static public function preloadAccountsLines($aids, $billrun_key, $filter_fields = FALSE) {
+		static::$accountsLines = static::$accountsLines + static::loadAccountsLines($aids, $billrun_key, $filter_fields);
+	}
+
+	/**
+	 * Gets all the account lines for this billrun from the db
+	 * @param type $aids the account to get the lines for.
+	 * @param type $billrun_key the billrun key  that the lines should be in.
+	 * @param type $filter_fields the fileds that the returned lines need to have.
+	 * @param array $excluded_stamps stamps excluded from the search
+	 * @return an array containing all the  accounts with thier lines.
+	 */
+	static public function loadAccountsLines($aids, $billrun_key, $filter_fields = FALSE) {
+		if (empty($aids)) {
+			return;
+		}
+
+		$ret = array();
+		$query = array(
+			'aid' => array('$in' => $aids),
+			'billrun' => $billrun_key
 		);
+
+		$requiredFields = array('aid' => 1);
+		$filter_fields = empty($filter_fields) ? Billrun_Factory::config()->getConfigValue('billrun.filter_fields', array()) : $filter_fields;
 
 		$sort = array(
-			'aid' => 1,
 			'urt' => 1,
 		);
-		Billrun_Factory::log()->log("Querying for account " . $aid . " lines", Zend_Log::INFO);
-		$cursor = $this->lines->query($query)->cursor()->fields($this->filter_fields)->sort($sort)->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'))->hint($hint);
-		Billrun_Factory::log()->log("Finished querying for account " . $aid . " lines", Zend_Log::INFO);
-//		$results = array();
-//		Billrun_Factory::log()->log("Saving account " . $aid . " lines to array", Zend_Log::DEBUG);
-//		foreach ($cursor as $entity) {
-//			$results[] = $entity;
-//		}
-//		Billrun_Factory::log()->log("Finished saving account " . $aid . " lines to array", Zend_Log::DEBUG);
-//		return $results;
-		return $cursor;
-	}
 
-	/**
-	 * Is billrun in live mode?
-	 * @return boolean true for live, false otherwise
-	 */
-	public static function isLiveUpdate() {
-		if (!isset(self::$live_update)) {
-			self::$live_update = Billrun_Factory::config()->getConfigValue('billrun.live_update', false);
+		Billrun_Factory::log()->log('Querying for accounts ' . implode(',', $aids) . ' lines', Zend_Log::INFO);
+		$addCount = $bufferCount = 0;
+		do {
+			$bufferCount += $addCount;
+			$cursor = Billrun_Factory::db()->linesCollection()
+//			$cursor = Billrun_Factory::db(array('host'=>'172.28.202.111','port'=>27017,'user'=>'reading','password'=>'guprgri','name'=>'billing','options'=>array('connect'=>1,'readPreference'=>"RP_SECONDARY_PREFERRED")))->linesCollection()
+				->query($query)->cursor()->fields(array_merge($filter_fields, $requiredFields))
+				->sort($sort)->skip($bufferCount)->limit(Billrun_Factory::config()->getConfigValue('billrun.linesLimit', 10000))->timeout(-1)
+				->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'));
+			foreach ($cursor as $line) {
+				$ret[$line['aid']][$line['stamp']] = $line;
+			}
+		} while (($addCount = $cursor->count(true)) > 0);
+		Billrun_Factory::log()->log('Finished querying for accounts ' . implode(',', $aids) . ' lines', Zend_Log::INFO);
+		foreach ($aids as $aid) {
+			if (!isset($ret[$aid])) {
+				$ret[$aid] = array();
+			}
 		}
-		return self::$live_update;
+		return $ret;
 	}
 
 	/**
-	 * Does the billrun allow overriding lines?
-	 * @return int the allowOverride flag
+	 * Remove account lines from the preload cache.
+	 * @param $aids a list of  aids to remove  of FALSE to remove all the  cached account lines. 	 
 	 */
-	public function allowOverride() {
-		return $this->allowOverride;
+	static public function clearPreLoadedLines($aids = FALSE) {
+		if ($aids === FALSE) {
+			static::$accountsLines = array();
+		} else {
+			foreach ($aids as $aid) {
+				unset(static::$accountsLines[$aid]);
+			}
+		}
 	}
 
 	/**
-	 * Resets the billrun data
-	 * @param type $account_id
-	 * @param type $billrun_key
+	 * Resets the billrun data. If an invoice id exists, it will be kept.
 	 */
-	public function resetBillrun($account_id, $billrun_key) {
-		$this->data = new Mongodloid_Entity($this->getAccountEmptyBillrunEntry($account_id, $billrun_key));
+	public function resetBillrun() {
+		$empty_billrun_entry = $this->getAccountEmptyBillrunEntry($this->aid, $this->billrun_key);
+		$invoice_id_field = (isset($this->data['invoice_id']) ? array('invoice_id' => $this->data['invoice_id']) : array());
+		$id_field = (isset($this->data['_id']) ? array('_id' => $this->data['_id']->getMongoID()) : array());
+		$this->data = new Mongodloid_Entity(array_merge($empty_billrun_entry, $invoice_id_field, $id_field), $this->billrun_coll);
+	}
+
+	/**
+	 * Returns the minimum billrun key greater than all the billrun keys in billrun collection
+	 * @return string billrun_key
+	 * @todo create an appropriate index on billrun collection
+	 */
+	public static function getActiveBillrun() {
+		$now = time();
+		$sort = array(
+			'billrun_key' => -1,
+		);
+		$fields = array(
+			'billrun_key' => 1,
+		);
+		$runtime_billrun_key = Billrun_Util::getBillrunKey($now);
+		$last = Billrun_Factory::db(array('name' => 'billrun'))->billrunCollection()->query()->cursor()->limit(1)->fields($fields)->sort($sort)->current();
+		if ($last->isEmpty()) {
+			$active_billrun = $runtime_billrun_key;
+		} else {
+			$active_billrun = Billrun_Util::getFollowingBillrunKey($last['billrun_key']);
+			$billrun_start_time = Billrun_Util::getStartTime($active_billrun);
+			if ($now - $billrun_start_time > 5184000) { // more than two months diff (60*60*24*30*2)
+				$active_billrun = $runtime_billrun_key;
+			}
+		}
+		return $active_billrun;
+	}
+
+	/**
+	 * returns true if account has no active subscribers and no relevant lines for next billrun
+	 * @return true if account is deactivated (causes no xml to be produced for this account)
+	 */
+	public function is_deactivated() {
+		$deactivated = true;
+		foreach ($this->data['subs'] as $subscriber) {
+			$its_empty = $this->empty_subscriber($subscriber);
+			if (!$its_empty) {
+				$deactivated = false;
+				break;
+			}
+		}
+		return $deactivated;
+	}
+
+	/**
+	 * checks for a given account if its "empty" : its status is closed and it has no relevant lines for next billrun
+	 * @param type $subscriber : sid
+	 * @return true if its "emtpy"
+	 */
+	public function empty_subscriber($subscriber) {
+		$status = $subscriber['subscriber_status'];
+		return ( ($status == "closed") && !isset($subscriber['breakdown']));
 	}
 
 }

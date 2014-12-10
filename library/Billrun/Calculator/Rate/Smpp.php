@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -17,7 +17,6 @@ class Billrun_Calculator_Rate_Smpp extends Billrun_Calculator_Rate_Sms {
 	protected $legitimateValues = array(
 //		'cause_of_terminition' => "100",
 		'record_type' => '1',
-		'called_number' => array('000000000002020', '000000000006060', '000000000007070', '000000000005060', '000000000002040'),
 	);
 
 	public function __construct($options = array()) {
@@ -48,4 +47,24 @@ class Billrun_Calculator_Rate_Smpp extends Billrun_Calculator_Rate_Sms {
 		return $line['type'] == 'smpp';
 	}
 
+	protected function getLineRate($row, $usage_type) {
+		$matchedRate = false;
+		if ($this->shouldLineBeRated($row)) {
+			$called_number = $this->extractNumber($row);
+			$line_time = $row['urt'];
+			if (isset($this->rates[$called_number])) {
+				foreach ($this->rates[$called_number] as $rate) {
+					if (isset($rate['rates'][$usage_type])) {
+						if ($rate['from'] <= $line_time && $rate['to'] >= $line_time) {
+							$matchedRate = $rate;
+							break;
+						}
+					}
+				}
+			}
+		}
+		return $matchedRate;
+	}
+
 }
+

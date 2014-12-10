@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -111,20 +111,11 @@ class TabledateModel extends TableModel {
 	}
 
 	public function duplicate($params) {
-		$key = $params[$this->search_key];
-		$count = $this->collection
-			->query($this->search_key, $key)
-			->count();
-
-		if ($count) {
-			die(json_encode("key already exists"));
-		}
-		unset($params['_id']);
 		$from = new Zend_Date($params['from'], null, 'he-IL');
 		$to = new Zend_Date($params['to'], null, 'he-IL');
 		$params['from'] = new MongoDate($from->getTimestamp());
 		$params['to'] = new MongoDate($to->getTimestamp());
-		return $this->update($params);
+		return parent::duplicate($params);
 	}
 
 	public function update($params) {
@@ -151,11 +142,11 @@ class TabledateModel extends TableModel {
 
 	public function getLastItem($key_name) {
 		$result = $this->collection
-			->query($this->search_key, $key_name)
-			->cursor()
-			->sort(array('to' => -1))
-			->limit(1)
-			->current();
+				->query($this->search_key, $key_name)
+				->cursor()
+				->sort(array('to' => -1))
+				->limit(1)
+				->current();
 		$result->collection($this->collection);
 		return $result;
 	}
@@ -194,10 +185,6 @@ class TabledateModel extends TableModel {
 		} else {
 			return parent::applyFilter($filter_field, $value);
 		}
-	}
-
-	public function toolbar() {
-		return 'date';
 	}
 
 	public function getFilterFieldsOrder() {

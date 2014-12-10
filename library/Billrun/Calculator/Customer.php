@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -45,6 +45,24 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 	 */
 	protected $bulk = true;
 
+	/**
+	 * Extra customer fields to be saved by line type
+	 * @var array
+	 */
+	protected $extraData = array();
+
+	/**
+	 * all international ggsn rates
+	 * @var array
+	 */
+	protected $intlGgsnRates = array();
+
+	/**
+	 *
+	 * @var type 
+	 */
+	protected $ratesModel;
+
 	public function __construct($options = array()) {
 		parent::__construct($options);
 
@@ -54,10 +72,16 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 		if (isset($options['calculator']['bulk'])) {
 			$this->bulk = $options['calculator']['bulk'];
 		}
+		if (isset($options['calculator']['extra_data'])) {
+			$this->extraData = $options['calculator']['extra_data'];
+		}
 
 		$this->subscriber = Billrun_Factory::subscriber();
 		$this->plans = Billrun_Factory::db()->plansCollection();
 		$this->lines_coll = Billrun_Factory::db()->linesCollection();
+
+		$this->loadIntlGgsnRates();
+		$this->ratesModel = new RatesModel();
 	}
 
 	/**
@@ -79,10 +103,10 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 	}
 
 	/**
-	 * write the calculation into DB
+	 * make the  calculation
 	 */
 	public function updateRow($row) {
-		Billrun_Factory::dispatcher()->trigger('beforeCalculatorWriteRow', array($row, $this));
+		Billrun_Factory::dispatcher()->trigger('beforeCalculatorUpdateRow', array($row, $this));
 		$row->collection($this->lines_coll);
 		if ($this->isBulk()) {
 			$this->subscribersByStamp();
@@ -92,22 +116,57 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 		}
 		if (!$subscriber || !$subscriber->isValid()) {
 			if ($this->isOutgoingCall($row)) {
-				Billrun_Factory::log('Missing subscriber info for line with stamp : ' . $row->get('stamp'), Zend_Log::ALERT);
+				Billrun_Factory::log('Missing subscriber info for line with stamp : ' . $row->get('stamp'), Zend_Log::NOTICE);
 				return false;
 			} else {
 				Billrun_Factory::log('Missing subscriber info for line with stamp : ' . $row->get('stamp'), Zend_Log::DEBUG);
-				return true;
+				return $row;
 			}
 		}
 
 		foreach (array_keys($subscriber->getAvailableFields()) as $key) {
 			if (is_numeric($subscriber->{$key})) {
-				$subscriber->{$key} = intval($subscriber->{$key});
+				$subscriber->{$key} = intval($subscriber->{$key}); // remove this conversion when Vitali changes the output of the CRM to integers
 			}
 			$subscriber_field = $subscriber->{$key};
 			$row[$key] = $subscriber_field;
 		}
-		Billrun_Factory::dispatcher()->trigger('afterCalculatorWriteRow', array($row, $this));
+		foreach (array_keys($subscriber->getCustomerExtraData())as $key) {
+			if ($this->isExtraDataRelevant($row, $key)) {
+				$subscriber_field = $subscriber->{$key};
+				$row[$key] = $subscriber_field;
+				if ($key == 'last_vlr') { // also it's possible to add alpha3 only if daily_ird_plan is true
+					if ($subscriber->{$key}) {
+						$rate = $this->ratesModel->getRateByVLR($subscriber->{$key});
+						if ($rate) {
+							$row['alpha3'] = $rate['alpha3'];
+						}
+					}
+				}
+			}
+		}
+		Billrun_Factory::dispatcher()->trigger('afterCalculatorUpdateRow', array($row, $this));
+		return $row;
+	}
+
+	/**
+	 * Returns whether to save the extra data field to the line or not
+	 * @param Mongodloid_Entity $line
+	 * @param string $field
+	 * @return boolean
+	 */
+	public function isExtraDataRelevant(&$line, $field) {
+		if (empty($this->extraData[$line['type']]) || !in_array($field, $this->extraData[$line['type']])) {
+			return false;
+		}
+		if ($line['type'] == 'ggsn') {
+			if (is_array($line)) {
+				$arate = $line['arate'];
+			} else {
+				$arate = $line->get('arate', true);
+			}
+			return isset($this->intlGgsnRates[strval($arate['$id'])]);
+		}
 		return true;
 	}
 
@@ -115,21 +174,29 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 	 * Override parent calculator to save changes with update (not save)
 	 */
 	public function writeLine($line, $dataKey) {
-		Billrun_Factory::dispatcher()->trigger('beforeCalculatorWriteLine', array('data' => $line));
-		$save = array();
-		$saveProperties = array_keys(Billrun_Factory::subscriber()->getAvailableFields());
+		Billrun_Factory::dispatcher()->trigger('beforeCalculatorWriteLine', array('data' => $line, 'calculator' => $this));
+
+		$save = array(
+			'$set' => array(),
+		);
+		$saveProperties = array_merge(array('last_vlr', 'alpha3'), array_keys(Billrun_Factory::subscriber()->getAvailableFields()), array_keys(Billrun_Factory::subscriber()->getCustomerExtraData()));
 		foreach ($saveProperties as $p) {
 			if (!is_null($val = $line->get($p, true))) {
 				$save['$set'][$p] = $val;
 			}
 		}
-		$where = array('stamp' => $line['stamp']);
-		Billrun_Factory::db()->linesCollection()->update($where, $save);
-		Billrun_Factory::dispatcher()->trigger('afterCalculatorWriteLine', array('data' => $line));
+
+		if (count($save['$set'])) {
+			$where = array('stamp' => $line['stamp']);
+			Billrun_Factory::db()->linesCollection()->update($where, $save);
+		}
+
 		if (!isset($line['usagev']) || $line['usagev'] === 0) {
 			$this->removeLineFromQueue($line);
 			unset($this->data[$dataKey]);
 		}
+
+		Billrun_Factory::dispatcher()->trigger('afterCalculatorWriteLine', array('data' => $line, 'calculator' => $this));
 	}
 
 	/**
@@ -153,6 +220,7 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 	public function loadSubscribers($rows) {
 		$this->subscribers_by_stamp = false;
 		$params = array();
+		$subscriber_extra_data = array_keys($this->subscriber->getCustomerExtraData());
 		foreach ($rows as $row) {
 			if ($this->isLineLegitimate($row)) {
 				$line_params = $this->getIdentityParams($row);
@@ -161,6 +229,13 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 				} else {
 					$line_params['time'] = date(Billrun_Base::base_dateformat, $row['urt']->sec);
 					$line_params['stamp'] = $row['stamp'];
+					$line_params['EXTRAS'] = 0;
+					foreach ($subscriber_extra_data as $key) {
+						if ($this->isExtraDataRelevant($row, $key)) {
+							$line_params['EXTRAS'] = 1;
+							break;
+						}
+					}
 					$params[] = $line_params;
 				}
 			}
@@ -195,7 +270,7 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 			if (isset($row[$key])) {
 				$params[$toKey['toKey']] = preg_replace($toKey['clearRegex'], '', $row[$key]);
 				//$this->subscriberNumber = $params[$toKey['toKey']];
-				Billrun_Factory::log("found identification for row : {$row['stamp']} from {$key} to " . $toKey['toKey'] . ' with value :' . $params[$toKey['toKey']], Zend_Log::DEBUG);
+				Billrun_Factory::log("found identification for row: {$row['stamp']} from {$key} to " . $toKey['toKey'] . ' with value:' . $params[$toKey['toKey']], Zend_Log::DEBUG);
 				break;
 			}
 		}
@@ -219,11 +294,11 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 		$calculator_tag = $this->getCalculatorQueueType();
 		$advance_stamps = array();
 		foreach ($this->lines as $stamp => $item) {
-			if (!isset($item['aid'])) {
+			if (!isset($this->data[$stamp]['aid'])) {
 				$advance_stamps[] = $stamp;
 			} else {
 				$query = array('stamp' => $stamp);
-				$update = array('$set' => array('calc_name' => $calculator_tag, 'calc_time' => false, 'aid' => $item['aid']));
+				$update = array('$set' => array('calc_name' => $calculator_tag, 'calc_time' => false, 'aid' => $this->data[$stamp]['aid'], 'sid' => $this->data[$stamp]['sid']));
 				$queue->update($query, $update);
 			}
 		}
@@ -290,6 +365,22 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 			$outgoing = in_array($line['record_type'], array('01', '11'));
 		}
 		return $outgoing;
+	}
+
+	protected function loadIntlGgsnRates() {
+		$rates_coll = Billrun_Factory::db()->ratesCollection();
+		$query = array(
+			'params.sgsn_addresses' => array(
+				'$exists' => TRUE,
+			),
+			'key' => array(
+				'$ne' => 'INTERNET_BILL_BY_VOLUME',
+			),
+		);
+		$rates = $rates_coll->query($query)->cursor()->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'));
+		foreach ($rates as $rate) {
+			$this->intlGgsnRates[strval($rate->getId())] = $rate;
+		}
 	}
 
 }

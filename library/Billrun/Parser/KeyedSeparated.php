@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -37,7 +37,7 @@ class Billrun_Parser_KeyedSeparated extends Billrun_Parser_Separator {
 			if ($i % 2) {
 				$keyedRecord[$lastKey] = utf8_encode($this->unescape($brokenLine[$i], $this->getSeparator()));
 			} else {
-				$lastKey = $brokenLine[$i];
+				$lastKey = utf8_encode($brokenLine[$i]);
 			}
 		}
 		return $keyedRecord;

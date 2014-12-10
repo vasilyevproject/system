@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -26,6 +26,7 @@ class archiveCustomerPlugin extends archivePlugin {
 	 * method to declare the archive scope data
 	 * 
 	 * @return array query to run. the results lines will be removed
+	 * @todo 000000 is not a valid billrun stamp anymore
 	 */
 	protected function getQuery() {
 		return array(

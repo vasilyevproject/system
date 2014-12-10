@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -15,7 +15,10 @@
 class Billrun_DBRef {
 
 	protected static $entities;
-	protected static $keys = array('rates' => 'key');
+	protected static $keys = array(
+		'rates' => 'key',
+		'plans' => 'name',
+	);
 
 	protected static function initCollection($collection_name) {
 		if (isset(self::$keys[$collection_name])) {

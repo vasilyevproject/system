@@ -13,6 +13,8 @@
 abstract class Billrun_Calculator_Rate extends Billrun_Calculator {
 
 	const DEF_CALC_DB_FIELD = 'arate';
+	const DEF_APR_DB_FIELD = 'apr';
+	
 
 	/**
 	 * the type of the object
@@ -34,6 +36,7 @@ abstract class Billrun_Calculator_Rate extends Billrun_Calculator {
 	 */
 	protected $ratingField = self::DEF_CALC_DB_FIELD;
 	protected $pricingField = Billrun_Calculator_CustomerPricing::DEF_CALC_DB_FIELD;
+	protected $aprField = self::DEF_APR_DB_FIELD;
 
 	public function __construct($options = array()) {
 		parent::__construct($options);
@@ -65,19 +68,6 @@ abstract class Billrun_Calculator_Rate extends Billrun_Calculator {
 	abstract protected function getLineRate($row, $usage_type);
 
 	/**
-	 * Get an array of prefixes for a given.
-	 * @param string $str the number to get prefixes to.
-	 * @return Array the possible prefixes of the number sorted by prefix size in decreasing order.
-	 */
-	protected function getPrefixes($str) {
-		$prefixes = array();
-		for ($i = strlen($str); $i > 0; $i--) {
-			$prefixes[] = substr($str, 0, $i);
-		}
-		return $prefixes;
-	}
-
-	/**
 	 * method to receive the lines the calculator should take care
 	 * 
 	 * @return Mongodloid_Cursor Mongo cursor for iteration
@@ -104,9 +94,9 @@ abstract class Billrun_Calculator_Rate extends Billrun_Calculator {
 	 * Override parent calculator to save changes with update (not save)
 	 */
 	public function writeLine($line, $dataKey) {
-		Billrun_Factory::dispatcher()->trigger('beforeCalculatorWriteLine', array('data' => $line));
+		Billrun_Factory::dispatcher()->trigger('beforeCalculatorWriteLine', array('data' => $line, 'calculator' => $this));
 		$save = array();
-		$saveProperties = array($this->ratingField, 'usaget', 'usagev', $this->pricingField);
+		$saveProperties = array($this->ratingField, 'usaget', 'usagev', $this->pricingField, $this->aprField);
 		foreach ($saveProperties as $p) {
 			if (!is_null($val = $line->get($p, true))) {
 				$save['$set'][$p] = $val;
@@ -114,7 +104,7 @@ abstract class Billrun_Calculator_Rate extends Billrun_Calculator {
 		}
 		$where = array('stamp' => $line['stamp']);
 		Billrun_Factory::db()->linesCollection()->update($where, $save);
-		Billrun_Factory::dispatcher()->trigger('afterCalculatorWriteLine', array('data' => $line));
+		Billrun_Factory::dispatcher()->trigger('afterCalculatorWriteLine', array('data' => $line, 'calculator' => $this));
 		if (!isset($line['usagev']) || $line['usagev'] === 0) {
 			$this->removeLineFromQueue($line);
 			unset($this->lines[$line['stamp']]);
@@ -133,7 +123,7 @@ abstract class Billrun_Calculator_Rate extends Billrun_Calculator {
 		$type = $line['type'];
 		if (!isset(self::$calcs[$type])) {
 			// @TODO: use always the first condition for all types - it will load the config values by default
-			if ($type === 'smsc' || $type === 'smpp') {
+			if ($type === 'smsc' || $type === 'smpp' || $type === 'tap3') {
 				$configOptions = Billrun_Factory::config()->getConfigValue('Rate_' . ucfirst($type));
 				$options = array_merge($options, $configOptions);
 			}
@@ -141,6 +131,33 @@ abstract class Billrun_Calculator_Rate extends Billrun_Calculator {
 			self::$calcs[$type] = new $class($options);
 		}
 		return self::$calcs[$type];
+	}
+
+	/**
+	 * make the calculation
+	 */
+	public function updateRow($row) {
+		Billrun_Factory::dispatcher()->trigger('beforeCalculatorUpdateRow', array($row, $this));
+		$current = $row->getRawData();
+		$usage_type = $this->getLineUsageType($row);
+		$volume = $this->getLineVolume($row, $usage_type);
+		$rate = $this->getLineRate($row, $usage_type);
+		if (isset($rate['key']) && $rate['key'] == "UNRATED") {
+			return false;
+		}
+		$added_values = array(
+			'usaget' => $usage_type,
+			'usagev' => $volume,
+			$this->ratingField => $rate ? $rate->createRef() : $rate,
+		);
+		if ($rate) {
+			$added_values[$this->aprField] = Billrun_Calculator_CustomerPricing::getPriceByRate($rate, $usage_type, $volume);
+		}
+		$newData = array_merge($current, $added_values);
+		$row->setRawData($newData);
+
+		Billrun_Factory::dispatcher()->trigger('afterCalculatorUpdateRow', array($row, $this));
+		return $row;
 	}
 
 }

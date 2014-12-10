@@ -3,7 +3,7 @@
 /**
  * @package         Billing
  * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
- * @license         GNU General Public License version 2 or later; see LICENSE.txt
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
@@ -28,7 +28,7 @@ abstract class Billrun_Generator extends Billrun_Base {
 	protected $export_directory;
 
 	/**
-	 * load balanced between db primary and slave
+	 * load balanced between db primary and secondary
 	 * @var int
 	 */
 	protected $loadBalanced = 0;
