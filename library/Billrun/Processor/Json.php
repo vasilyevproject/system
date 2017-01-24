@@ -1,14 +1,16 @@
 <?php
 
-/*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
+/**
+ * @package         Billing
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
- * Description of Json
+ * Billing json processor class
  *
- * @author Shani
+ * @package  Billing
+ * @since    2.0
  */
 class Billrun_Processor_Json extends Billrun_Processor {
 
@@ -19,7 +21,7 @@ class Billrun_Processor_Json extends Billrun_Processor {
 	 */
 	protected function parse() {
 		if (!is_resource($this->fileHandler)) {
-			Billrun_Factory::log()->log('Resource is not configured well', Zend_Log::ERR);
+			Billrun_Factory::log('Resource is not configured well', Zend_Log::ERR);
 			return FALSE;
 		}
 		$this->data['data'] = json_decode(stream_get_contents($this->fileHandler), true);

@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -15,25 +15,48 @@
 abstract class ApiAction extends Action_Base {
 
 	/**
+	 * initialize API action (run on constructor)
+	 */
+	public function init() {
+		// this will extend session timeout
+		Billrun_Util::setHttpSessionTimeout();
+	}
+
+	/**
 	 * how much time to store in cache (seconds)
 	 * 
 	 * @var int
 	 */
 	protected $cacheLifetime = 14400;
-	
-	function setError($error_message, $input = null) {
-		Billrun_Factory::log()->log("Sending Error : {$error_message}", Zend_Log::NOTICE);
+
+	/**
+	 * Set an error message to the controller.
+	 * @param string $errorMessage - Error message to send to the controller.
+	 * @param object $input - The input the triggerd the error.
+	 * @return ALWAYS false.
+	 */
+	function setError($errorMessage, $input = null) {
+		Billrun_Factory::log("Sending Error : {$errorMessage}", Zend_Log::NOTICE);
 		$output = array(
 			'status' => 0,
-			'desc' => $error_message,
+			'desc' => $errorMessage,
 		);
 		if (!is_null($input)) {
 			$output['input'] = $input;
 		}
-		$this->getController()->setOutput(array($output));
-		return;
+
+		// Throwing a general exception.
+		// TODO: Debug default code
+		$ex = new Billrun_Exceptions_Api(999, array(), $errorMessage);
+		throw $ex;
+
+		// If failed to report to controller.
+		if (!$this->getController()->setOutput(array($output))) {
+			Billrun_Factory::log("Failed to set message to controller. message: " . $errorMessage, Zend_Log::CRIT);
+		}
+
+		return false;
 	}
-	
 
 	/**
 	 * method to store and fetch by global cache layer
@@ -54,16 +77,17 @@ abstract class ApiAction extends Action_Base {
 		$cachePrefix = $this->getCachePrefix();
 		$cacheKey = Billrun_Util::generateArrayStamp(array_values($params['stampParams']));
 		$cachedData = $cache->get($cacheKey, $cachePrefix);
-		if (empty($cachedData)) {
+		if (!empty($cachedData)) {
+			Billrun_Factory::log("Fetch data from cache for " . $actionName . " api call", Zend_Log::INFO);
+		} else {
 			$cachedData = $this->fetchData($params['fetchParams']);
 			$lifetime = Billrun_Factory::config()->getConfigValue('api.cacheLifetime.' . $actionName, $this->getCacheLifeTime());
 			$cache->set($cacheKey, $cachedData, $cachePrefix, $lifetime);
-		} else {
-			Billrun_Factory::log()->log("Fetch data from cache for " . $actionName . " api call", Zend_Log::INFO);
 		}
+
 		return $cachedData;
 	}
-	
+
 	/**
 	 * method to get cache prefix of this action
 	 * 
@@ -72,7 +96,7 @@ abstract class ApiAction extends Action_Base {
 	protected function getCachePrefix() {
 		return $this->getAction() . '_';
 	}
-	
+
 	/**
 	 * method to get controller action name
 	 * 
@@ -81,7 +105,7 @@ abstract class ApiAction extends Action_Base {
 	protected function getAction() {
 		return Yaf_Dispatcher::getInstance()->getRequest()->getActionName();
 	}
-	
+
 	/**
 	 * basic fetch data method used by the cache
 	 * 
@@ -100,13 +124,28 @@ abstract class ApiAction extends Action_Base {
 	protected function setCacheLifeTime($val) {
 		$this->cacheLifetime = $val;
 	}
-	
+
 	/**
 	 * method to get api call cache lifetime
 	 * @return int $val the cache lifetime (seconds)
 	 */
 	protected function getCacheLifeTime() {
 		return $this->cacheLifetime;
+	}
+
+	/**
+	 * render override to handle HTTP 1.0 requests
+	 * 
+	 * @param string $tpl template name
+	 * @param array $parameters view parameters
+	 * @return string output
+	 */
+	protected function render($tpl, array $parameters = array()) {
+		$ret = parent::render($tpl, $parameters);
+		if ($this->getRequest()->get('SERVER_PROTOCOL') == 'HTTP/1.0' && !is_null($ret) && is_string($ret)) {
+			header('Content-Length: ' . strlen($ret));
+		}
+		return $ret;
 	}
 
 }

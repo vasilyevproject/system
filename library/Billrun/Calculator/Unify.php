@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -19,6 +19,7 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 
 	protected $unifiedLines = array();
 	protected $unificationFields;
+	protected $mergedUpdateFields;
 	protected $archivedLines = array();
 	protected $unifiedToRawLines = array();
 	protected $dateSeperation = "Ymd";
@@ -26,9 +27,14 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 	protected $protectedConcurrentFiles = true;
 	protected $archiveDb;
 //	protected $activeBillrun;
-	protected $dbConcurrentPref = 'RP_PRIMARY_PREFERRED';
-	protected $dbReadPref = 'RP_SECONDARY_PREFERRED';
+	protected $dbConcurrentPref = 'RP_PRIMARY';
+	protected static $calcs = array();
+	protected $writeConcern = 0;
 
+	/**
+	 * Create a new instance of the unify caclulator object.
+	 * @param array $options - Array of input options to create the object by.
+	 */
 	public function __construct($options = array()) {
 		parent::__construct($options);
 		$this->init();
@@ -36,27 +42,66 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 			$this->dateSeperation = $options['date_seperation'];
 		}
 
+		$this->unificationFields = $this->getUnificationFields($options);
+		$this->mergedUpdateFields = $this->getMergedUpdateFields($this->unificationFields);
+
+		if (isset($options['accept_archived_lines'])) {
+			$this->acceptArchivedLines = $options['accept_archived_lines'];
+		}
+
+		if (isset($options['protect_concurrent_files'])) {
+			$this->protectedConcurrentFiles = $options['protect_concurrent_files'];
+		}
+
+		// archive connection setting
+		$this->archiveDb = Billrun_Factory::db();
+	}
+
+	protected function getMergedUpdateFields($unificationFields) {
+		$updateFields = array();
+		foreach ($unificationFields as $type => $settings) {
+			$updateFields[$type] = array();
+			foreach ($settings['fields'] as $fieldSpecific) {
+				$updateFields[$type] = array_merge_recursive($updateFields[$type], $fieldSpecific['update']);
+			}
+		}
+		return $updateFields;
+	}
+
+	/**
+	 * Get the unification fields.
+	 * @param array $options - Array of input options.
+	 * @return array The unification fields.
+	 */
+	protected function getUnificationFields($options) {
 		if (isset($options['unification_fields'])) {
-			$this->unificationFields = $options['unification_fields'];
+			return $options['unification_fields'];
 		} else {
 			// TODO: put in seperate config dedicate to unify
-			$this->unificationFields = array(
+			return array(
 				'ggsn' => array(
 					'required' => array(
 						'fields' => array('sid', 'aid', 'ggsn_address', 'arate', 'urt'),
 						'match' => array(
-							'sgsn_address' => '/^(?=62\.90\.|37\.26\.)/',
+							'sgsn_address' => '/^(?=62\.90\.|37\.26\.|85\.64\.|172\.28\.|176\.12\.158\.)/',
 						),
 					),
 					'date_seperation' => 'Ymd',
 					'stamp' => array(
-						'value' => array('sgsn_address', 'ggsn_address', 'sid', 'aid', 'arate', 'imsi', 'plan', 'rating_group', 'billrun', 'rat_type'), 
+						'value' => array('sgsn_address', 'ggsn_address', 'sid', 'aid', 'arate', 'imsi', 'plan', 'rating_group', 'billrun', 'rat_type'),
 						'field' => array('in_plan', 'out_plan', 'over_plan', 'aprice'),
 					),
 					'fields' => array(
-						'$set' => array('process_time'),
-						'$setOnInsert' => array('urt', 'imsi', 'usagesb', 'usaget', 'aid', 'sid', 'ggsn_address', 'sgsn_address', 'rating_group', 'arate', 'plan', 'billrun', 'rat_type'),
-						'$inc' => array('usagev', 'aprice', 'apr', 'fbc_downlink_volume', 'fbc_uplink_volume', 'duration', 'in_plan', 'out_plan', 'over_plan'),
+						array(
+							'match' => array(
+								'type' => '/.*/',
+							),
+							'update' => array(
+								'$set' => array('process_time'),
+								'$setOnInsert' => array('urt', 'imsi', 'usagesb', 'usaget', 'aid', 'sid', 'ggsn_address', 'sgsn_address', 'rating_group', 'arate', 'plan', 'billrun', 'rat_type'),
+								'$inc' => array('usagev', 'aprice', 'apr', 'fbc_downlink_volume', 'fbc_uplink_volume', 'duration', 'in_plan', 'out_plan', 'over_plan'),
+							)
+						)
 					),
 				),
 				'nsn' => array(
@@ -72,27 +117,20 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 						'field' => array()
 					),
 					'fields' => array(
-						'$set' => array('process_time'),
-						'$setOnInsert' => array('urt', 'record_type', 'in_circuit_group', 'in_circuit_group_name', 'out_circuit_group', 'out_circuit_group_name', 'calling_subs_last_ex_id', 'called_subs_last_ex_id', 'arate', 'usaget'),
-						'$inc' => array('usagev', 'duration'),
+						array(
+							'match' => array(
+								'type' => '/.*/',
+							),
+							'update' => array(
+								'$set' => array('process_time'),
+								'$setOnInsert' => array('urt', 'record_type', 'in_circuit_group', 'in_circuit_group_name', 'out_circuit_group', 'out_circuit_group_name', 'calling_subs_last_ex_id', 'called_subs_last_ex_id', 'arate', 'usaget'),
+								'$inc' => array('usagev', 'duration'),
+							)
+						)
 					),
 				),
 			);
 		}
-
-		if (isset($options['accept_archived_lines'])) {
-			$this->acceptArchivedLines = $options['accept_archived_lines'];
-		}
-
-		if (isset($options['protect_concurrent_files'])) {
-			$this->protectedConcurrentFiles = $options['protect_concurrent_files'];
-		}
-
-		$this->dbReadPref = Billrun_Factory::config()->getConfigValue('read_only_db_pref', $this->dbReadPref);
-		$this->dbConcurrentPref = Billrun_Factory::config()->getConfigValue('concurrent_db_pref', $this->dbConcurrentPref);
-
-		// archive connection setting
-		$this->archiveDb = Billrun_Factory::db(Billrun_Factory::config()->getConfigValue('archive.db'));
 	}
 
 	/**
@@ -106,6 +144,10 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 //		$this->activeBillrun = Billrun_Billrun::getActiveBillrun();
 	}
 
+	protected function setUnifiedLineDefaults(&$line) {
+		$line['urt'] = new MongoDate(strtotime(date('Ymd 12:00:00', $line['urt']->sec)));
+	}
+
 	/**
 	 * add a sigle row/line to unified line if there is no unified line then create one.
 	 * @param array $rawRow the single row to unify.
@@ -114,7 +156,7 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 	public function updateRow($rawRow) {
 		$newRow = $rawRow instanceof Mongodloid_Entity ? $rawRow->getRawData() : $rawRow;
 		// we aligned the urt to one main timestamp to avoid DST issues; effect only unified data
-		$newRow['urt'] = new MongoDate(strtotime(date('Ymd 12:00:00', $newRow['urt']->sec)));
+		$this->setUnifiedLineDefaults($newRow);
 		$updatedRowStamp = $this->getLineUnifiedLineStamp($newRow);
 
 		$rawRow['u_s'] = $updatedRowStamp;
@@ -122,16 +164,16 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 		$this->unifiedToRawLines[$updatedRowStamp]['remove'][] = $newRow['stamp'];
 
 		if (($this->protectedConcurrentFiles && $this->isLinesLocked($updatedRowStamp, array($newRow['stamp']))) ||
-				(!$this->acceptArchivedLines && $this->isLinesArchived(array($newRow['stamp'])))) {
+			(!$this->acceptArchivedLines && $this->isLinesArchived(array($newRow['stamp'])))) {
 			Billrun_Factory::log("Line {$newRow['stamp']} was already applied to unified line $updatedRowStamp", Zend_Log::NOTICE);
 			return true;
 		}
-
-		$updatedRow = $this->getUnifiedRowForSingleRow($updatedRowStamp, $newRow);
-		foreach ($this->unificationFields[$newRow['type']]['fields'] as $key => $fields) {
+		$typeFields = $this->getLineSpecificUpdateFields($newRow);
+		$updatedRow = $this->getUnifiedRowForSingleRow($updatedRowStamp, $newRow, $typeFields);
+		foreach ($typeFields as $key => $fields) {
 			foreach ($fields as $field) {
 				if ($key == '$inc' && isset($newRow[$field])) {
-					$updatedRow[$field] += $newRow[$field];
+					$updatedRow[$field] += ($newRow[$field] && is_numeric($newRow[$field])) ? $newRow[$field] : 0;
 				} else if ($key == '$set' && isset($newRow[$field])) {
 					$updatedRow[$field] = $newRow[$field];
 				}
@@ -144,6 +186,16 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 		return true;
 	}
 
+	protected function getLineSpecificUpdateFields($line) {
+		$fields = array();
+		foreach ($this->unificationFields[$line['type']]['fields'] as $field) {
+			if ($this->verifyMatchField($field['match'], $line)) {
+				$fields = array_merge_recursive($fields, $field['update']);
+			}
+		}
+		return $fields;
+	}
+
 	/**
 	 * saved the single rows that were unified to the archive.
 	 * @return array containing the rows that were failed when trying to save to the archive.
@@ -151,38 +203,23 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 	public function saveLinesToArchive() {
 		$failedArchived = array();
 		$linesArchivedStamps = array();
-		$archLinesColl = $this->archiveDb->linesCollection()->setReadPreference($this->dbConcurrentPref);
-		$localLines = Billrun_Factory::db()->linesCollection()->setReadPreference($this->dbConcurrentPref);
+		$archLinesColl = $this->archiveDb->archiveCollection();
+		$localLines = Billrun_Factory::db()->linesCollection();
 
 		$archivedLinesCount = count($this->archivedLines);
 		if ($archivedLinesCount > 0) {
+			$saveOptions = array('w' => $this->writeConcern);
 			try {
 				Billrun_Factory::log('Saving ' . $archivedLinesCount . ' source lines to archive.', Zend_Log::INFO);
-				$archLinesColl->batchInsert($this->archivedLines);
+				$archLinesColl->batchInsert($this->archivedLines, $saveOptions);
 				$this->data = array_diff_key($this->data, $this->archivedLines);
 				$linesArchivedStamps = array_keys($this->archivedLines);
 			} catch (Exception $e) {
 				Billrun_Factory::log("Failed to insert to archive. " . $e->getCode() . " : " . $e->getMessage(), Zend_Log::ALERT);
 				// todo: dump lines into file
 			}
-//			foreach ($this->archivedLines as $line) {
-//				try {
-//					$archLinesColl->insert($line, array('w' => 1));
-//					$linesArchivedStamps[] = $line['stamp'];
-//					unset($this->data[$line['stamp']]);
-//				} catch (\Exception $e) {
-//					if ($e->getCode() == '11000') {
-//						Billrun_Factory::log("got duplicate line when trying to save line {$line['stamp']} to archive.", Zend_Log::ALERT);
-//						$linesArchivedStamps[] = $line['stamp'];
-//						unset($this->data[$line['stamp']]);
-//					} else {
-//						Billrun_Factory::log("Failed when trying to save a line {$line['stamp']} to the archive failed with: " . $e->getCode() . " : " . $e->getMessage(), Zend_Log::ALERT);
-//						$failedArchived[] = $line;
-//					}
-//				}
-//			}
 			Billrun_Factory::log('Removing Lines from the lines collection....', Zend_Log::INFO);
-			$localLines->remove(array('stamp' => array('$in' => $linesArchivedStamps)));
+			$localLines->remove(array('stamp' => array('$in' => $linesArchivedStamps)), $saveOptions);
 		}
 		return $failedArchived;
 	}
@@ -194,7 +231,6 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 	public function updateUnifiedLines() {
 		Billrun_Factory::log('Updating ' . count($this->unifiedLines) . ' unified lines...', Zend_Log::INFO);
 		$db = Billrun_Factory::db();
-		$db->setMongoNativeLong(1);
 		$updateFailedLines = array();
 		foreach ($this->unifiedLines as $key => $row) {
 			$query = array('stamp' => $key, 'type' => $row['type'], 'tx' => array('$nin' => $this->unifiedToRawLines[$key]['update']));
@@ -206,7 +242,7 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 //					'billrun' => $this->activeBillrun,
 			));
 			$update = array_merge($base_update, $this->getlockLinesUpdate($this->unifiedToRawLines[$key]['update']));
-			foreach ($this->unificationFields[$row['type']]['fields'] as $fkey => $fields) {
+			foreach ($this->mergedUpdateFields[$row['type']] as $fkey => $fields) {
 				foreach ($fields as $field) {
 					if (isset($row[$field])) {
 						$update[$fkey][$field] = $row[$field];
@@ -216,14 +252,9 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 			$update['$inc']['lcount'] = $row['lcount'];
 
 			$linesCollection = $db->linesCollection();
-			if ($db->compareServerVersion('2.6', '>=')) {
-				$ret = $linesCollection->setReadPreference($this->dbConcurrentPref)->update($query, $update, array('w' => 1, 'upsert' => true));
-				$success = isset($ret['ok']) && $ret['ok'] && isset($ret['n']) && $ret['n'] > 0;
-			} else { // 2.4 has a bug with the update command, so let's use FAM
-				$ret = $linesCollection->setReadPreference($this->dbConcurrentPref)->findAndModify($query, $update, array('stamp' => 1), array('upsert' => true, 'new' => true));
-				$success = !$ret->isEmpty();
-			}
-			if (!$success) {//TODO add support for w => 0 it should  not  enter the if
+			$ret = $linesCollection->update($query, $update, array('upsert' => true, 'w' => $this->writeConcern));
+			$success = ($this->writeConcern == 0 && $ret) || (($this->writeConcern > 0 || $this->writeConcern = 'majority') && isset($ret['ok']) && $ret['ok'] && isset($ret['n']) && $ret['n'] > 0);
+			if (!$success) {
 				$updateFailedLines[$key] = array('unified' => $row, 'lines' => $this->unifiedToRawLines[$key]['update']);
 				foreach ($this->unifiedToRawLines[$key]['update'] as $lstamp) {
 					unset($this->archivedLines[$lstamp]);
@@ -231,7 +262,6 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 				Billrun_Factory::log("Updating unified line $key failed.", Zend_Log::ERR);
 			}
 		}
-		$db->setMongoNativeLong(0);
 		return $updateFailedLines;
 	}
 
@@ -254,11 +284,11 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 	 * @param array $newRow the single row.
 	 * @return array containing  a new or existing unified row.
 	 */
-	protected function getUnifiedRowForSingleRow($updatedRowStamp, $newRow) {
+	protected function getUnifiedRowForSingleRow($updatedRowStamp, $newRow, $typeFields) {
 		$type = $newRow['type'];
 		if (isset($this->unifiedLines[$updatedRowStamp])) {
 			$existingRow = $this->unifiedLines[$updatedRowStamp];
-			foreach ($this->unificationFields[$type]['fields']['$inc'] as $field) {
+			foreach ($typeFields['$inc'] as $field) {
 				if (isset($newRow[$field]) && !isset($existingRow[$field])) {
 					$existingRow[$field] = 0;
 				}
@@ -266,7 +296,7 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 		} else {
 			//Billrun_Factory::log(print_r($newRow,1),Zend_Log::ERR);
 			$existingRow = array('lcount' => 0, 'type' => $type);
-			foreach ($this->unificationFields[$type]['fields'] as $key => $fields) {
+			foreach ($typeFields as $key => $fields) {
 				foreach ($fields as $field) {
 					if ($key == '$inc' && isset($newRow[$field])) {
 						$existingRow[$field] = 0;
@@ -299,9 +329,15 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 		foreach ($typeData['stamp']['field'] as $field) {
 			$serialize_array['exists'][$field] = isset($newRow[$field]) ? '1' : '0';
 		}
-		$dateSeperation = (isset($typeData['date_seperation']) ? $typeData['date_seperation'] : $this->dateSeperation);
-		$serialize_array['dateSeperation'] = date($dateSeperation, $newRow['urt']->sec);
+		if (($dateSeparationValue = $this->getDateSeparation($newRow, $typeData)) !== FALSE) {
+			$serialize_array['dateSeperation'] = $dateSeparationValue;
+		}
 		return Billrun_Util::generateArrayStamp($serialize_array);
+	}
+
+	protected function getDateSeparation($line, $typeData) {
+		$dateSeperation = (isset($typeData['date_seperation']) ? $typeData['date_seperation'] : $this->dateSeperation);
+		return date($dateSeperation, $line['urt']->sec);
 	}
 
 	public function isLineLegitimate($line) {
@@ -309,18 +345,25 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 
 		if ($matched) {
 			$requirements = $this->unificationFields[$line['type']]['required'];
-			foreach ($requirements['match'] as $field => $regex) {
-				// @todo: make it pluginable with chain of responsibility
-				if ($field == 'classMethod') {
-					$matched = call_user_func_array(array($this, $regex), array($line));
-				} elseif (!preg_match($regex, $line[$field])) {
-					$matched = false;
-				}
+			$matched = $this->verifyMatchField($requirements['match'], $line) && (count(array_intersect(array_keys($line->getRawData()), $requirements['fields'])) == count($requirements['fields']));
+			if (!$matched && isset($this->unificationFields[$line['type']]['archive_fallback']) && $this->verifyMatchField($this->unificationFields[$line['type']]['archive_fallback'], $line)) {
+				$this->archivedLines[$line['stamp']] = $line->getRawData();
 			}
 		}
-		return $matched &&
-				//verify that all the required field exists in the line
-				(count(array_intersect(array_keys($line->getRawData()), $requirements['fields'])) == count($requirements['fields']));
+		return $matched;
+	}
+
+	protected function verifyMatchField($rules, $line) {
+		$matched = true;
+		foreach ($rules as $field => $regex) {
+			// @todo: make it pluginable with chain of responsibility
+			if ($field == 'classMethod') {
+				$matched &= call_user_func_array(array($this, $regex), array($line));
+			} elseif (!preg_match($regex, $line[$field])) {
+				$matched &= false;
+			}
+		}
+		return $matched;
 	}
 
 	public function isNsnLineLegitimate($line) {
@@ -338,7 +381,7 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 	 */
 	protected function isLinesLocked($unifiedStamp, $lineStamps) {
 		$query = array('stamp' => $unifiedStamp, 'tx' => array('$in' => $lineStamps));
-		return !Billrun_Factory::db()->linesCollection()->setReadPreference($this->dbReadPref)->query($query)->cursor()->limit(1)->current()->isEmpty();
+		return !Billrun_Factory::db()->linesCollection()->query($query)->cursor()->limit(1)->current()->isEmpty();
 	}
 
 	/**
@@ -347,8 +390,8 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 	 * @return boolean true if the line all ready exist in the archive false otherwise.
 	 */
 	protected function isLinesArchived($lineStamps) {
-
-		return !$this->archiveDb->linesCollection()->setReadPreference($this->dbReadPref)->query(array('stamp' => array('$in' => $lineStamps)))->cursor()->limit(1)->current()->isEmpty();
+		$lineQuery = array('stamp' => array('$in' => $lineStamps));
+		return !$this->archiveDb->archiveCollection()->query($lineQuery)->cursor()->limit(1)->current()->isEmpty();
 	}
 
 	/**
@@ -374,7 +417,7 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 		$query = array('stamp' => $unifiedStamp);
 
 		$update = array('$pullAll' => array('tx' => $lineStamps));
-		Billrun_Factory::db()->linesCollection()->setReadPreference($this->dbConcurrentPref)->update($query, $update);
+		Billrun_Factory::db()->linesCollection()->update($query, $update);
 	}
 
 	/**
@@ -407,6 +450,44 @@ class Billrun_Calculator_Unify extends Billrun_Calculator {
 	public function removeFromQueue() {
 		parent::removeFromQueue();
 		$this->releaseAllLines();
+	}
+
+	/**
+	 * Return the lines that need(ed) archive
+	 * @param arra $param
+	 */
+	public function getArchiveLines() {
+		return $this->archivedLines;
+	}
+
+	public static function getInstance() {
+		$args = func_get_args();
+
+		$stamp = md5(serialize($args));
+		if (isset(self::$instance[$stamp])) {
+			return self::$instance[$stamp];
+		}
+
+		$line = $args[0]['line'];
+		unset($args[0]['line']);
+
+		$type = $line['type'];
+		if (!isset(self::$calcs[$type])) {
+			// @TODO: use always the first condition for all types - it will load the config values by default
+			$class = 'Billrun_Calculator_Unify';
+			if (isset($line['realtime']) && $line['realtime']) {
+				$configOptions = Billrun_Factory::config()->getConfigValue('Unify_' . ucfirst($type), array());
+				$options = array_merge($args[0], $configOptions, array('type' => $line['type']));
+				$class .= '_Realtime';
+			}
+			self::$calcs[$type] = new $class($options);
+			self::$calcs[$type]->init();
+		}
+		return self::$calcs[$type];
+	}
+	
+	public function prepareData($lines) {
+		
 	}
 
 }

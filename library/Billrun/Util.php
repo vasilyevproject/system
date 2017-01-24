@@ -1,8 +1,7 @@
 <?php
-
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -13,7 +12,28 @@
  * @since    0.5
  */
 class Billrun_Util {
+	public static $dataUnits = array(
+		'B' => 0, 
+		'KB' => 1, 
+		'MB' => 2, 
+		'GB' => 3, 
+		'TB' => 4,
+		'PB' => 5, 
+		'EB' => 6, 
+		'ZB' => 7, 
+		'YB' => 8
+	);
+	
+	public static $timeUnits = array(
+		"second" => 1,
+		"minute" => 60,
+		"hour" => 3600, // 60 * 60
+		"day" => 86400, // 24 * 60 * 60
+		"week" => 604800, // 7 * 24 * 60 * 60
+		"year" => 220752000, // 365 * 7 * 24 * 60 * 60
+	);
 
+	
 	/**
 	 * method to filter user input
 	 * 
@@ -85,12 +105,29 @@ class Billrun_Util {
 	}
 
 	/**
+	 * generate a random number of reqested length based on microtime
+	 * @param int $length length of the random number
+	 * @return number
+	 */
+	public static function generateRandomNum($length = 19) {
+		$milliseconds = round(microtime(true) * 10000);
+		$l = strlen($milliseconds);
+		if ($l >= $length) {
+			return substr($milliseconds, $l - $length, $length);
+		}
+
+		$start = pow(10, $length - $l - 1);
+		$additional = rand($start, $start * 10 - 1);
+		return $additional . $milliseconds;
+	}
+
+	/**
 	 * generate current time from the base time date format
 	 * 
 	 * @return string the current date time formatted by the system default format
 	 */
 	public static function generateCurrentTime() {
-		return date(Billrun_Base::base_dateformat);
+		return date(Billrun_Base::base_datetimeformat);
 	}
 
 	/**
@@ -115,7 +152,7 @@ class Billrun_Util {
 	 * @param string $datetime the datetime. can be all input types of strtotime function
 	 * @param type $offset the timezone offset +/-xxxx or +/-xx:xx
 	 * 
-	 * @return MongoDate MongoObject
+	 * @return int a timestamp on success, false on failure
 	 */
 	public static function dateTimeConvertShortToIso($datetime, $offset = '+00:00') {
 		if (strpos($offset, ':') === FALSE) {
@@ -123,47 +160,34 @@ class Billrun_Util {
 		} else {
 			$tz_offset = $offset;
 		}
-		$date_formatted = str_replace(' ', 'T', date(Billrun_Base::base_dateformat, strtotime($datetime))) . $tz_offset; // Unnecessary code?
-		$datetime = strtotime($date_formatted);
-		return $datetime;
-	}
-
-	public static function startsWith($haystack, $needle) {
-		return !strncmp($haystack, $needle, strlen($needle));
+		$date_formatted = str_replace(' ', 'T', date(Billrun_Base::base_datetimeformat, strtotime($datetime))) . $tz_offset; // Unnecessary code?
+		$ret = strtotime($date_formatted);
+		return $ret;
 	}
 
 	/**
-	 * method to receive billrun key by date
+	 * method to check if string (needle) is starts with another string (haystack)
 	 * 
-	 * @param int $timestamp a unix timestamp
-	 * @param int $dayofmonth the day of the month require to get; if omitted return config value
-	 * @return string date string of format YYYYmm
+	 * @param string $haystack the string to search in
+	 * @param string $needle the searched string
+	 * 
+	 * @return boolean return true if haystack starts with needle
+	 * 
+	 * @internal strncmp is faster as twice than substr
 	 */
-	public static function getBillrunKey($timestamp, $dayofmonth = null) {
-		if (!$dayofmonth) {
-			$dayofmonth = Billrun_Factory::config()->getConfigValue('billrun.charging_day', 25);
-		}
-		$format = "Ym";
-		if (date("d", $timestamp) < $dayofmonth) {
-			$key = date($format, $timestamp);
-		} else {
-			$key = date($format, strtotime('+1 day', strtotime('last day of this month', $timestamp)));
-		}
-		return $key;
+	public static function startsWith($haystack, $needle) {
+		return !strncmp($haystack, $needle, strlen($needle));
 	}
-
-	public static function getFollowingBillrunKey($billrun_key) {
-		$datetime = $billrun_key . "01000000";
-		$month_later = strtotime('+1 month', strtotime($datetime));
-		$ret = date("Ym", $month_later);
-		return $ret;
-	}
-
-	public static function getPreviousBillrunKey($billrun_key) {
-		$datetime = $billrun_key . "01000000";
-		$month_later = strtotime('-1 month', strtotime($datetime));
-		$ret = date("Ym", $month_later);
-		return $ret;
+	
+	/**
+	 * Returns a readable date from billrun key.
+	 * example: converts "201607" to : "July 2016"
+	 * 
+	 * @param type $billrunKey
+	 * @return type
+	 */
+	public static function billrunKeyToReadable($billrunKey) {
+		return date('F Y', strtotime($billrunKey . '01'));
 	}
 
 	/**
@@ -173,6 +197,7 @@ class Billrun_Util {
 	 * @param type $from the currency to conver from.
 	 * @param type $to the currency to convert to.
 	 * @return float the converted value.
+	 * @deprecated since version 2.5
 	 */
 	public static function convertCurrency($value, $from, $to) {
 		$conversion = array(
@@ -185,33 +210,12 @@ class Billrun_Util {
 	}
 
 	/**
-	 * returns the end timestamp of the input billing period
-	 * @param type $billrun_key
-	 * @return type int
-	 */
-	public static function getEndTime($billrun_key) {
-		$dayofmonth = Billrun_Factory::config()->getConfigValue('billrun.charging_day', 25);
-		$datetime = $billrun_key . $dayofmonth . "000000";
-		return strtotime('-1 second', strtotime($datetime));
-	}
-
-	/**
-	 * returns the start timestamp of the input billing period
-	 * @param type $billrun_key
-	 * @return type int
-	 */
-	public static function getStartTime($billrun_key) {
-		$dayofmonth = Billrun_Factory::config()->getConfigValue('billrun.charging_day', 25);
-		$datetime = $billrun_key . $dayofmonth . "000000";
-		return strtotime('-1 month', strtotime($datetime));
-	}
-
-	/**
 	 * method to get VAT cost on specific datetime
 	 * 
 	 * @param int $timestamp datetime in unix timestamp format
 	 * 
 	 * @return float the VAT at the current timestamp
+	 * @todo move to specific VAT object
 	 */
 	public static function getVATAtDate($timestamp) {
 		$mongo_date = new MongoDate($timestamp);
@@ -220,13 +224,28 @@ class Billrun_Util {
 				->query('key', 'VAT')
 				->lessEq('from', $mongo_date)
 				->greaterEq('to', $mongo_date)
-				->cursor()->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'))->current()->get('vat');
+				->cursor()->current()->get('vat');
 	}
 
+	/**
+	 * method to check if input is timestamp
+	 * @param mixed $timestamp
+	 * @return return true if input is timestamp else false
+	 */
 	public static function isTimestamp($timestamp) {
 		return ((string) (int) $timestamp === strval($timestamp)) && ($timestamp <= PHP_INT_MAX) && ($timestamp >= ~PHP_INT_MAX);
 	}
 
+	/**
+	 * method to set modified time of file
+	 * 
+	 * @param string $received_path the file full path
+	 * @param int $timestamp the timestamp of the file
+	 * 
+	 * @return true on success else false
+	 * 
+	 * @todo move to Receiver object
+	 */
 	public static function setFileModificationTime($received_path, $timestamp) {
 		return touch($received_path, $timestamp);
 	}
@@ -245,20 +264,18 @@ class Billrun_Util {
 	 * @return string size in requested format
 	 */
 	public static function byteFormat($bytes, $unit = "", $decimals = 2, $includeUnit = false, $dec_point = ".", $thousands_sep = ",") {
-		$units = array('B' => 0, 'KB' => 1, 'MB' => 2, 'GB' => 3, 'TB' => 4,
-			'PB' => 5, 'EB' => 6, 'ZB' => 7, 'YB' => 8);
-
+		$unit = strtoupper($unit);
 		$value = 0;
-		if ($bytes > 0) {
+		if ($bytes != 0) {
 			// Generate automatic prefix by bytes 
 			// If wrong prefix given, search for the closest unit
-			if (!array_key_exists($unit, $units)) {
-				$pow = floor(log($bytes) / log(1024));
-				$unit = array_search($pow, $units);
+			if (!array_key_exists($unit, self::$dataUnits)) {
+				$pow = floor(log(abs($bytes)) / log(1024));
+				$unit = array_search($pow, self::$dataUnits);
 			}
 
 			// Calculate byte value by prefix
-			$value = ($bytes / pow(1024, floor($units[$unit])));
+			$value = ($bytes / pow(1024, floor(self::$dataUnits[$unit])));
 		}
 
 		if ($unit == 'B') {
@@ -282,21 +299,127 @@ class Billrun_Util {
 	}
 
 	/**
+         * convert KB/MB/GB/TB/PB/EB/ZB/YB to bytes
+         * @param string $unitSizeToByte 
+         * @param string $convertToOtherUnit use when we want to return different unit size
+         * @param int $decimals 
+         * @param string $dec_point sets the separator for the decimal point
+         * @return int of bytes
+         */
+        public static function computerUnitToBytes($unitSizeToByte = '0B', $convertToOtherUnit = 'B', $decimals = 0 , $dec_point = ".", $thousands_sep = ","){
+            $unitSizeAndType = [];
+            $pattern = '/(\d+\.\d+|\d+)(\w+)$/';
+            preg_match($pattern, $unitSizeToByte, $unitSizeAndType);
+            $unitSize = $unitSizeAndType[1];
+            $unitType = $unitSizeAndType[2];
+            $bytes = 0;
+            $powerCalc = self::$dataUnits[$unitType] - self::$dataUnits[$convertToOtherUnit];
+            
+            if(isset(self::$dataUnits[$unitType]) && !empty($unitSize)){
+                if($powerCalc >= 0){
+                    $bytes = number_format($unitSize * pow(1024, floor($powerCalc)), $decimals, $dec_point, $thousands_sep );
+                }else{
+					$decimals = 6;
+                    $bytes = number_format($unitSize / pow(1024, floor(abs($powerCalc))), $decimals, $dec_point, $thousands_sep );
+                }
+            }
+            
+            return $bytes;
+        }
+        
+	/**
 	 * convert seconds to requested format
 	 * 
-	 * @param string $bytes
-	 * 
+	 * @param string $seconds
+	 * @param bool $toMinutesSecondFormat if true returning minutes and second format
 	 * @return string size in requested foramt
 	 * 
 	 * 60 sec => 1 min
 	 * 10 sec => 10 sec
 	 * 3400 sec => X minutes
 	 */
-	public static function durationFormat($seconds) {
-		if ($seconds > 3600) {
+	public static function durationFormat($seconds, $formatSeconds = false) {
+		if ($seconds >= 3600) {
 			return gmdate('H:i:s', $seconds);
 		}
-		return gmdate('i:s', $seconds);
+		if ($formatSeconds) {
+			return gmdate('i:s', $seconds);
+		}
+		return $seconds;
+	}
+	
+	/**
+	 * method to convert seconds to closest unit or by specific unit
+	 * 
+	 * @param int $seconds seconds value to convert
+	 * @param string $unit the unit to convert (empty to automatically convert to closest unit)
+	 * @param int $decimals decimal point
+	 * @param bool $includeUnit output unit on return
+	 * @param string $round_method method to round with the return value
+	 * @param string $decimal_sep the decimal point separator
+	 * @param string $thousands_sep the thousands separator
+	 * 
+	 * @return string the seconds formatted with the specific unit
+	 */
+	public static function secondFormat($seconds, $unit = "", $decimals = 2, $includeUnit = false, $round_method = 'none', $decimal_sep = ".", $thousands_sep = ",") {
+		if (empty($unit) || !array_key_exists($unit, self::$timeUnits)) {
+			$units = array_reverse(self::$timeUnits);
+			foreach ($units as $k => $v) {
+				if ($seconds >= $v) {
+					$unit = $k;
+					break;
+				}
+			}
+		}
+		
+		$value = $seconds / self::$timeUnits[$unit];
+		
+		if ($round_method != 'none' && function_exists($round_method)) {
+			$value = call_user_func_array($round_method, array($value));
+		}
+		
+		$number = number_format($value, $decimals, $decimal_sep, $thousands_sep);
+		
+		if ($includeUnit) {
+			return $number . ' ' . $unit . ($value > 1 || $value == 0 ? 's' : '');
+		}
+		return $number;
+		
+	}
+	
+	/**
+	 * convert seconds to readable format [English]
+	 * 
+	 * @param int $seconds seconds to convert
+	 * 
+	 * @return string readable format
+	 */
+	public static function durationReadableFormat($seconds) {
+		$units = array(
+			"year" => 220752000, // 365 * 7 * 24 * 60 * 60
+			"week" => 604800, // 7 * 24 * 60 * 60
+			"day" => 86400, // 24 * 60 * 60
+			"hour" => 3600, // 60 * 60
+			"minute" => 60,
+			"second" => 1,
+		);
+
+		if ($seconds == 0) {
+			return "0 seconds";
+		}
+		$s = array();
+		foreach ($units as $name => $div) {
+			$quot = intval($seconds / $div);
+			if ($quot) {
+				$unit = $name;
+				if (abs($quot) > 1) {
+					$unit .= "s";
+				}
+				$s[] = $quot . " " . $unit;
+				$seconds -= $quot * $div;
+			}
+		}
+		return implode($s, ', ');
 	}
 
 	/**
@@ -313,10 +436,13 @@ class Billrun_Util {
 		return FALSE;
 	}
 
-	public static function sendMail($subject, $body, $recipients, $attachments = array()) {
-		$mailer = Billrun_Factory::mailer()->
-			setSubject($subject)->
-			setBodyText($body);
+	public static function sendMail($subject, $body, $recipients, $attachments = array(), $html = false) {
+		$mailer = Billrun_Factory::mailer()->setSubject($subject);
+		if($html){
+			$mailer->setBodyHtml($body, "UTF-8");
+		} else {
+			$mailer->setBodyText($body);
+		}
 		//add attachments
 		foreach ($attachments as $attachment) {
 			$mailer->addAttachment($attachment);
@@ -328,6 +454,12 @@ class Billrun_Util {
 		$mailer->addTo($recipients);
 		//sen email
 		return $mailer->send();
+	}
+
+	public static function getForkUrl() {
+		$request = Yaf_Dispatcher::getInstance()->getRequest();
+		$protocol = (empty($request->getServer('HTTPS'))) ? 'http' : 'https';
+		return $protocol . '://' . $request->get('SERVER_ADDR') . '/' . $request->getBaseUri();
 	}
 
 	/**
@@ -359,8 +491,32 @@ class Billrun_Util {
 			error_log("Can't fork PHP process");
 			return false;
 		}
-		usleep(500000);
 		return true;
+	}
+
+	/**
+	 * Get start time by period given:
+	 * "day" - begin of day
+	 * "week" - begin of week
+	 * "month" - begin of month
+	 * "year" - begin of year
+	 * 
+	 * @param type $period
+	 * @return type
+	 */
+	public static function getStartTimeByPeriod($period = 'day') {
+		switch ($period) {
+			case ('day'):
+				return strtotime("midnight");
+			case ('week'):
+				return strtotime("last sunday");
+			case ('month'):
+				return strtotime(date('01-m-Y'));
+			case ('year'):
+				return strtotime(date('01-01-Y'));
+		}
+
+		return time();
 	}
 
 	/**
@@ -405,6 +561,44 @@ class Billrun_Util {
 	}
 
 	/**
+	 * remove all elements that are not string and not numeric
+	 * @param array $ar array to verify
+	 * @return array
+	 */
+	public static function array_remove_compound_elements($ar) {
+		if (!is_array($ar)) {
+			return array();
+		}
+		return array_filter($ar, function($var) {
+			return is_string($var) || is_numeric($var);
+		});
+	}
+
+	/**
+	 * method to convert msisdn to local phone number (remove country extension)
+	 * 
+	 * @param string $msisdn the phone number to convert
+	 * @param string $defaultPrefix the default prefix to add
+	 * 
+	 * @return string phone number in msisdn format
+	 */
+	public static function localNumber($msisdn, $defaultPrefix = null) {
+		if (is_null($defaultPrefix)) {
+			$defaultPrefix = Billrun_Factory::config()->getConfigValue('billrun.defaultCountryPrefix', 972);
+		}
+		$prefixLength = strlen($defaultPrefix);
+		if (substr($msisdn, 0, $prefixLength) != $defaultPrefix) {
+			return $msisdn;
+		}
+		if (substr($msisdn, 0, $prefixLength+1) == $defaultPrefix . '1') {
+			$prefix = '';
+		} else {
+			$prefix = '0';
+		}
+		return $prefix . substr($msisdn, (-1) * strlen($msisdn) + $prefixLength);
+	}
+
+	/**
 	 * method to convert phone number to msisdn
 	 * 
 	 * @param string $phoneNumber the phone number to convert
@@ -425,12 +619,19 @@ class Billrun_Util {
 			$phoneNumber = self::cleanLeadingZeros($phoneNumber);
 		}
 
-		if (self::isIntlNumber($phoneNumber) || strlen($phoneNumber) > 12) { // len>15 means not msisdn
+		if (is_null($defaultPrefix)) {
+			$defaultPrefix = Billrun_Factory::config()->getConfigValue('billrun.defaultCountryPrefix', 972);
+		}
+
+		$phoneLength = strlen($phoneNumber);
+		$prefixLength = strlen($defaultPrefix);
+
+		if ($phoneLength >= $prefixLength && substr($phoneNumber, 0, $prefixLength) == $defaultPrefix) {
 			return $phoneNumber;
 		}
 
-		if (is_null($defaultPrefix)) {
-			$defaultPrefix = Billrun_Factory::config()->getConfigValue('billrun.defaultCountryPrefix', 972);
+		if (self::isIntlNumber($phoneNumber) || $phoneLength > 12) { // len>15 means not msisdn
+			return $phoneNumber;
 		}
 
 		return $defaultPrefix . $phoneNumber;
@@ -473,7 +674,7 @@ class Billrun_Util {
 	 * @return string the number without leading zeros
 	 */
 	public static function cleanLeadingZeros($number) {
-		return ltrim($number, "0");
+		return ltrim($number, "+0");
 	}
 
 	/**
@@ -491,6 +692,7 @@ class Billrun_Util {
 	 * @param array $credit_row
 	 * 
 	 * @return array after filtering and validation
+	 * @todo move to parser Object
 	 */
 	public static function parseCreditRow($credit_row) {
 		// @TODO: take to config
@@ -509,6 +711,8 @@ class Billrun_Util {
 			'plan' => array(),
 			'vatable' => array('default' => '1'),
 			'promotion' => array(),
+			'fixed' => array(),
+			'additional' => array(),
 		);
 		$filtered_request = array();
 
@@ -606,10 +810,17 @@ class Billrun_Util {
 			unset($filtered_request['subscriber_id']);
 		}
 
-		if ($filtered_request['aid'] == 0 || $filtered_request['sid'] == 0) {
+		if ($filtered_request['aid'] == 0) {
 			return array(
 				'status' => 0,
-				'desc' => 'account, subscriber ids must be positive integers',
+				'desc' => 'account id must be positive integers',
+			);
+		}
+
+		if ($filtered_request['sid'] < 0) {
+			return array(
+				'status' => 0,
+				'desc' => 'subscriber id must be greater or equal to zero',
 			);
 		}
 
@@ -643,36 +854,56 @@ class Billrun_Util {
 	public static function parseServiceRow($service_row, $billrun_key) {
 		$service_row['source'] = 'api';
 		$service_row['usaget'] = $service_row['type'] = 'service';
-		$service_row['urt'] = new MongoDate(Billrun_Util::getEndTime($billrun_key));
+		$service_row['urt'] = new MongoDate(Billrun_Billingcycle::getEndTime($billrun_key));
 		ksort($service_row);
 		$service_row['stamp'] = Billrun_Util::generateArrayStamp($service_row);
 		return $service_row;
 	}
 
 	/**
-	 * convert assoc array to MongoDB query
-	 * 
-	 * @param array $array the array to convert
-	 * @return array the MongoDB array conversion
-	 * 
-	 * @todo move to Mongodloid
+	 * Convert associative Array to XML
+	 * @param Array $data Associative Array
+	 * @param Array $parameters
+	 * @return mixed XML string or FALSE if failed
 	 */
-	public static function arrayToMongoQuery($array) {
-		$query = array();
-		foreach ($array as $key => $val) {
-			if (is_array($val) && strpos($key, '$') !== 0) {
-				foreach (self::arrayToMongoQuery($val) as $subKey => $subValue) {
-					if (strpos($subKey, '$') === 0) {
-						$query[$key][$subKey] = $subValue;
-					} else {
-						$query[$key . "." . $subKey] = $subValue;
-					}
-				}
-			} else {
-				$query[$key] = $val;
-			}
+	public static function arrayToXml($data, $parameters = array()) {
+		if (!is_array($data)) {
+			return false;
 		}
-		return $query;
+		//Defaults
+		$version = !empty($parameters['version']) ? $parameters['version'] : '1.0';
+		$encoding = !empty($parameters['encoding']) ? $parameters['encoding'] : 'UTF-8';
+		$indent = !empty($parameters['indent']) ? $parameters['indent'] : false;
+		$rootElement = !empty($parameters['rootElement']) ? $parameters['rootElement'] : 'root';
+		$childElement = !empty($parameters['childElement']) ? $parameters['childElement'] : 'node';
+
+		$xml = new XmlWriter();
+		$xml->openMemory();
+		$xml->setIndent($indent);
+		$xml->startDocument($version, $encoding);
+		$xml->startElement($rootElement);
+		self::recursiveWriteXmlBody($xml, $data, $childElement);
+		$xml->endElement(); //write end element
+		return $xml->outputMemory();
+	}
+
+	/**
+	 * Write XML body nodes
+	 * @param object $xml XMLWriter Object
+	 * @param array $data Associative Data Array
+	 */
+	public static function recursiveWriteXmlBody(XMLWriter $xml, $data, $childElement) {
+		foreach ($data as $key => $value) {
+			if (is_array($value)) {
+				$key = is_numeric($key) ? $childElement : $key;
+				$xml->startElement($key);
+				self::recursiveWriteXmlBody($xml, $value, $childElement);
+				$xml->endElement();
+				continue;
+			}
+			$key = is_numeric($key) ? $childElement : $key;
+			$xml->writeElement($key, $value);
+		}
 	}
 
 	/**
@@ -701,6 +932,13 @@ class Billrun_Util {
 		fclose($fd);
 	}
 
+	/**
+	 * method to log failed service
+	 * 
+	 * @param array $row row to log
+	 * 
+	 * @since 2.8
+	 */
 	public static function logFailedServiceRow($row) {
 		$fd = fopen(Billrun_Factory::config()->getConfigValue('service.failed_credits_file', './files/failed_service.json'), 'a+');
 		fwrite($fd, json_encode($row) . PHP_EOL);
@@ -745,13 +983,23 @@ class Billrun_Util {
 	 * @return string host name or false when gethostname is not available (PHP 5.2 and lower)
 	 */
 	public static function getHostName() {
-		return function_exists('gethostname') ? gethostname() : false;
+		return function_exists('gethostname') ? @gethostname() : false;
+	}
+	
+	/**
+	 * method to get current operating system process id runnning the PHP
+	 * 
+	 * @return mixed current PHP process ID (int) or false on failure
+	 */
+	public static function getPid() {
+		return function_exists('getmypid') ? @getmypid() : false;
 	}
 
 	/**
 	 * Return the decimal value from the coded binary representation
 	 * @param int $binary
 	 * @return int
+	 * @todo move to Parser object
 	 */
 	public static function bcd_decode($binary) {
 		return ($binary & 0xF) . ((($binary >> 4) < 10) ? ($binary >> 4) : '' );
@@ -764,31 +1012,460 @@ class Billrun_Util {
 	 * @param type $defaultVal
 	 * @return type
 	 */
-	public static function getNestedArrayVal($array, $fields, $defaultVal = null,$retArr = FALSE) {
+	public static function getNestedArrayVal($array, $fields, $defaultVal = null, $retArr = FALSE) {
 		$fields = is_array($fields) ? $fields : explode('.', $fields);
 		$rawField = array_shift($fields);
-		preg_match("/\[([^\]]*)\]/", $rawField,$attr);		
-		if(!empty($attr)) {//Allow for  multiple attribute checks
-			$attr = explode("=",Billrun_Util::getFieldVal($attr[1],FALSE)); 
+		preg_match("/\[([^\]]*)\]/", $rawField, $attr);
+		if (!empty($attr)) {//Allow for  multiple attribute checks
+			$attr = explode("=", Billrun_Util::getFieldVal($attr[1], FALSE));
 		}
-		$field = preg_replace("/\[[^\]]*\]/", "", $rawField); 
-		$aggregate = $retArr &&  ($field =='*') ;
-		$keys = ($field != "*") ? array($field) : array_keys($array);	
-		
+		$field = preg_replace("/\[[^\]]*\]/", "", $rawField);
+		$aggregate = $retArr && ($field == '*');
+		$keys = ($field != "*") ? array($field) : array_keys($array);
+
 		$retVal = $aggregate ? array() : $defaultVal;
-		foreach ($keys as $key ) {
-			if( isset($array[$key]) && (empty($attr) || isset($array[$key][$attr[0]])) && (!isset($attr[1]) || $array[$key][$attr[0]] == $attr[1] ) ) {
+		foreach ($keys as $key) {
+			if (isset($array[$key]) && (empty($attr) || isset($array[$key][$attr[0]])) && (!isset($attr[1]) || $array[$key][$attr[0]] == $attr[1] )) {
 				if (!$aggregate) {
-					$retVal = empty($fields) ? $array[$key] : static::getNestedArrayVal($array[$key], $fields, $defaultVal,$retArr); 
+					$retVal = empty($fields) ? $array[$key] : static::getNestedArrayVal($array[$key], $fields, $defaultVal, $retArr);
 					break;
-				}
-				else {
-					$retVal[] = empty($fields) ? $array[$key] : static::getNestedArrayVal($array[$key], $fields, $defaultVal,$retArr); 
+				} else {
+					$retVal[] = empty($fields) ? $array[$key] : static::getNestedArrayVal($array[$key], $fields, $defaultVal, $retArr);
 				}
 			}
-		}		
-		
+		}
+
 		return $retVal;
+	}
+
+	/**
+	 * method to retrieve internation circuit groups
+	 * 
+	 * @todo take from db (?) with cache (static variable)
+	 */
+	public static function getIntlCircuitGroups() {
+		return Billrun_Factory::config()->getConfigValue('Rate_Nsn.calculator.intl_cg', array());
+	}
+
+	/**
+	 * method to retrieve rates that ought to be included for fraud 
+	 * @return array of rate refs
+	 */
+	public static function getIntlRateRefs() {
+		$rate_key_list = Billrun_Factory::config()->getConfigValue('Rate_Nsn.calculator.intl_rates', array());
+		$query = array("key" => array('$in' => $rate_key_list));
+		$ratesmodle = new RatesModel(array("collection" => "rates"));
+		$rates = $ratesmodle->getRates($query);
+		$rate_ref_list = array();
+		$ratesColl = Billrun_Factory::db()->ratesCollection();
+		foreach ($rates as $rate) {
+			$rate_ref_list[] = $ratesColl->createRefByEntity($rate)['$id']->{'$id'};
+		}
+		return $rate_ref_list;
+	}
+
+	/**
+	 * method to retrieve roaming circuit groups
+	 * 
+	 * @todo take from db (?) with cache (static variable)
+	 */
+	public static function getRoamingCircuitGroups() {
+		return Billrun_Factory::config()->getConfigValue('Rate_Nsn.calculator.roaming_cg', array());
+	}
+
+	/**
+	 * Send curl request
+	 * 
+	 * @param string $url full path
+	 * @param string $data parameters for the request
+	 * @param string $method should be POST or GET
+	 * 
+	 * @return array or FALSE on failure
+	 */
+	public static function sendRequest($url, $data = array(), $method = Zend_Http_Client::POST, array $headers = array('Accept-encoding' => 'deflate'), $timeout = null, $ssl_verify = null) {
+		if (empty($url)) {
+			Billrun_Factory::log("Bad parameters: url - " . $url . " method: " . $method, Zend_Log::ERR);
+			return FALSE;
+		}
+
+		$method = strtoupper($method);
+		if (!defined("Zend_Http_Client::" . $method)) {
+			return FALSE;
+		}
+
+		$zendMethod = constant("Zend_Http_Client::" . $method);
+		$curl = new Zend_Http_Client_Adapter_Curl();
+		if (!is_null($timeout)) {
+			$curl->setCurlOption(CURLOPT_TIMEOUT, $timeout);
+		}
+		if (!is_null($ssl_verify)) {
+			$curl->setCurlOption(CURLOPT_SSL_VERIFYPEER, $ssl_verify);
+		}
+		$client = new Zend_Http_Client($url);
+		$client->setHeaders($headers);
+		$client->setAdapter($curl);
+		$client->setMethod($method);
+
+		if (!empty($data)) {
+			if (!is_array($data)) {
+				$client->setRawData($data);
+			} else {
+				if ($zendMethod == Zend_Http_Client::POST) {
+					$client->setParameterPost($data);
+				} else {
+					$client->setParameterGet($data);
+				}
+			}
+		}
+		$response = null;
+		try {
+			$response = $client->request();
+			$output = $response->getBody();
+		} catch (Zend_Http_Client_Exception $e) {
+			$output = null;
+			if(!$response) {
+				$response = $e->getMessage();
+			}
+		}
+		if (empty($output)) {
+			Billrun_Factory::log("Bad RPC result: " . print_r($response, TRUE) . " Parameters sent: " . print_r($data, TRUE), Zend_Log::WARN);
+			return FALSE;
+		}
+
+		return $output;
+	}
+
+	/**
+	 * Convert array keys to lower case and underscore (Billrun convention)
+	 * 
+	 * @param array $data
+	 */
+	public static function parseDataToBillrunConvention($data = array()) {
+		$parsedData = array();
+		foreach ($data as $key => $value) {
+			if (is_array($value)) {
+				$value = self::parseDataToBillrunConvention($value);
+			}
+			$newKey = strtolower(preg_replace('/([a-z])([A-Z])/', '$1_$2', $key));
+			$parsedData[$newKey] = $value;
+		}
+
+		return $parsedData;
+	}
+
+	/**
+	 * Convert array keys to camel case from Billrun convention
+	 * 
+	 * @param array $data
+	 */
+	public static function parseBillrunConventionToCamelCase($data = array()) {
+		$parsedData = array();
+		foreach ($data as $key => $value) {
+			if (is_array($value)) {
+				$value = self::parseBillrunConventionToCamelCase($value);
+			}
+			$newKey = self::underscoresToCamelCase($key);
+			$parsedData[$newKey] = $value;
+		}
+
+		return $parsedData;
+	}
+
+	public static function underscoresToCamelCase($string, $capitalizeFirstCharacter = false) {
+
+		$str = str_replace(' ', '', ucwords(str_replace('_', ' ', $string)));
+		if (!$capitalizeFirstCharacter) {
+			$str[0] = strtolower($str[0]);
+		}
+		return $str;
+	}
+
+	/**
+	 * Return an integer based on an input string.
+	 * @param string/integer $input - String to convert or integer.
+	 * @return Integer value of input, or false if failed.
+	 */
+	public static function toNumber($input) {
+		if ($input === "UNLIMITED") {
+			return $input;
+		}
+
+		// Check that the input is an integer.
+		if (is_int($input)) {
+			return $input;
+		}
+
+		// Convert to int.
+		$temp = (int) $input;
+
+		// If the convertion returns 0 and the input string is not 0 it's an error.
+		if (!$temp && $input !== "0") {
+			Billrun_Factory::log("Update action did not receive a valid subscriber ID! [" . print_r($input, true) . ']', Zend_Log::ALERT);
+			return false;
+		}
+
+		return $temp;
+	}
+
+	/**
+	 * Check if an array is multidimentional.
+	 * @param $arr - Array to check.
+	 * @return boolean true if multidimentional array.
+	 */
+	public static function isMultidimentionalArray($arr) {
+		return count($arr) != count($arr, COUNT_RECURSIVE);
+	}
+
+	public static function isAssoc($arr) {
+		return is_array($arr) && (array_keys($arr) !== range(0, count($arr) - 1));
+	}
+
+	public static function getUsagetUnit($usaget) {
+		$units = Billrun_Factory::config()->getConfigValue('usaget.unit');
+		return isset($units[$usaget]) ? $units[$usaget] : '';
+	}
+
+	/**
+	 * Are two numbers equal (up to epsilon)
+	 * @param float $number1
+	 * @param float $number2
+	 * @param float $epsilon positive number
+	 * @return boolean
+	 */
+	public static function isEqual($number1, $number2, $epsilon = 0) {
+		return abs($number1 - $number2) < abs($epsilon);
+	}
+
+	/**
+	 * Floor a decimal
+	 * @param float $num
+	 * @param float $epsilon positive number
+	 * @return float
+	 */
+	public static function floordec($num, $epsilon) {
+		$rounded = round($num);
+		return static::isEqual($num, $rounded, $epsilon) ? $rounded : floor($num);
+	}
+
+	/**
+	 * Ceil a decimal
+	 * @param float $num
+	 * @param float $epsilon positive number
+	 * @return float
+	 */
+	public static function ceildec($num, $epsilon) {
+		$rounded = round($num);
+		return static::isEqual($num, $rounded, $epsilon) ? $rounded : ceil($num);
+	}
+
+	/**
+	 * Calculate the remaining months for an auto renew service
+	 * @param int $d1 unix timestamp
+	 * @param int $d2 unix timestamp
+	 * @return int
+	 * @deprecated since version 4.1 please use Billrun_Utils_Autorenew::countMonths
+	 * 
+	 */
+	public static function countMonths($d1, $d2) {
+		return Billrun_Utils_Autorenew::countMonths($d1, $d2);
+	}
+
+	/**
+	 * Check if a key exists in a multidimantional array.
+	 * @param array $arr - Array to search for the key.
+	 * @param type $key - Value of key to be found.
+	 * @return boolean - true if the key is found.
+	 */
+	public static function multiKeyExists(array $arr, $key) {
+		// is in base array?
+		if (array_key_exists($key, $arr)) {
+			return true;
+		}
+
+		// check arrays contained in this array
+		foreach ($arr as $element) {
+			if (!is_array($element)) {
+				continue;
+			}
+
+			// Recursively check if the key exists.
+			if (self::multiKeyExists($element, $key)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Set a dot seperated array as an assoc array.
+	 * @param type $original
+	 * @param type $dotArray
+	 * @param type $value
+	 * @param type $separator
+	 * @return type
+	 */
+	function setDotArrayToArray(&$original, $dotArray, $value, $separator = '.') {
+		$parts = explode($separator, $dotArray);
+		if (count($parts) <= 1) {
+			return $dotArray;
+		}
+
+		unset($original[$dotArray]);
+		$parts[] = $value;
+
+		$result = self::constructAssocArray($parts);
+		foreach ($result as $key => $value) {
+			$original[$key] = $value;
+		}
+	}
+
+	function constructAssocArray($parts) {
+		if ((count($parts)) <= 1) {
+			return $parts[0];
+		}
+
+		$shiftResult = array_shift($parts);
+		return array($shiftResult => self::constructAssocArray($parts));
+	}
+
+	/**
+	 * Return the first value of a multidimentional array.
+	 * Example:
+	 * [a => [b => [c => 4]]] returns 4.
+	 * @param array $array - The array to get the value of.
+	 * @return The first value of the array.
+	 */
+	public function getFirstValueOfMultidimentionalArray($array) {
+		if (is_array($array)) {
+			$next = reset($array);
+			return self::getFirstValueOfMultidimentionalArray($next);
+		}
+
+		return $array;
+	}
+	
+	public static function getCallTypes() {
+		return array_values(Billrun_Factory::config()->getConfigValue('realtimeevent.callTypes', array('call', 'video_call')));
+	}
+
+	
+	public static function getBillRunPath($path) {
+		if (empty($path) || !is_string($path)) {
+			return FALSE;
+		}
+		if ($path[0] == DIRECTORY_SEPARATOR) {
+			return $path;
+		}
+		return APPLICATION_PATH . DIRECTORY_SEPARATOR . $path;
+	}
+
+	/**
+	 * Get the shared folder path of the input path.
+	 * @param string $path - Path to convert to relative shared folder path.
+	 * @param boolean $strict - If true, and the path is a root folder, we return
+	 * the absoulute path, not the shared folder path! False by default.
+	 * @return string Relative file path in the shared folder.
+	 * @TODO: Add validation that if the input $path is already in the shared folder, return just the path.
+	 */
+	public static function getBillRunSharedFolderPath($path, $strict=false) {
+		if (empty($path) || !is_string($path)) {
+			return FALSE;
+		}
+		if ($strict && ($path[0] == DIRECTORY_SEPARATOR)) {
+			return $path;
+		}
+		return  APPLICATION_PATH . DIRECTORY_SEPARATOR . Billrun_Factory::config()->getConfigValue('shared_folder', 'shared') . DIRECTORY_SEPARATOR . Billrun_Factory::config()->getTenant() . DIRECTORY_SEPARATOR . $path;
+	}
+	
+	
+		/**
+	 * Return rounded amount for charging
+	 * @param float $amount
+	 * @return float
+	 */
+	public static function getChargableAmount($amount) {
+		return number_format($amount, 2, '.', '');
+	}
+
+	public static function generateHash($aid, $key){
+		return md5($aid . $key);
+	}
+	
+	public static function isValidCustomLineKey($jsonKey) {
+		if (strpos($jsonKey, '.') === FALSE) {
+			$protectedKeys = static::getBillRunProtectedLineKeys();
+			return is_scalar($jsonKey) && preg_match('/^(([a-z]|\d|_)+)$/', $jsonKey) && !in_array($jsonKey, $protectedKeys);
+		}
+		
+		foreach (explode('.', $jsonKey) as $key) {
+			if (!self::isValidCustomLineKey($key)) {
+				return false;
+			}
+		}
+		return true;
+	}
+	
+	public static function getBillRunProtectedLineKeys() {
+		return array('_id', 'aid', 'apr', 'aprice', 'arate', 'billrun', 'billrun_pretend', 'call_offset', 'connection_type', 'file', 'log_stamp', 'plan', 'plan_ref', 'process_time', 'row_number', 'sid', 'source', 'stamp', 'type', 'urt', 'usaget', 'usagev');
+	}
+
+	public static function isValidRegex($regex) {
+		return !(@preg_match($regex, null) === false);
+	}
+
+	public static function getCompanyName() {
+		return Billrun_Factory::config()->getConfigValue('tenant.name', '');
+	}
+
+	public static function getCompanyAddress() {
+		return Billrun_Factory::config()->getConfigValue('tenant.address', '');
+	}
+	public static function getCompanyPhone() {
+		return Billrun_Factory::config()->getConfigValue('tenant.phone', '');
+	}
+	public static function getCompanyWebsite() {
+		return Billrun_Factory::config()->getConfigValue('tenant.website', '');
+	}
+	public static function getCompanyEmail() {
+		return Billrun_Factory::config()->getConfigValue('tenant.email', '');
+	}
+	
+	public static function getTokenToDisplay($token, $charactersToShow = 4, $characterToDisplay = '*') {
+		return str_repeat($characterToDisplay, strlen($token) - $charactersToShow) . substr($token, -$charactersToShow);
+	}
+
+	/**
+	 * Returns params for a command (cmd).
+	 * if running with multi tenant adds the tenant to the command.
+	 * 
+	 */
+	public static function getCmdEnvParams() {
+		$ret = '--env ' . Billrun_Factory::config()->getEnv();
+		if (RUNNING_FROM_CLI && defined('APPLICATION_MULTITENANT')) {
+			$ret .= ' --tenant ' . Billrun_Factory::config()->getTenant();
+		}
+		return $ret;
+	}
+	
+	public static function IsIntegerValue($value) {
+		return is_numeric($value) && ($value == intval($value));
+	}
+	
+	public static function setHttpSessionTimeout($timeout = null) {
+		if (!is_null($timeout)) {
+			$sessionTimeout = $timeout;
+		} else {
+			$sessionTimeout = Billrun_Factory::config()->getConfigValue('session.timeout', 3600);
+		}
+		
+		ini_set('session.gc_maxlifetime', $sessionTimeout);
+		ini_set("session.cookie_lifetime", $sessionTimeout);
+        
+		$cookieParams = session_get_cookie_params();
+		session_set_cookie_params(
+			(int) $sessionTimeout, $cookieParams['path'], $cookieParams['domain'], $cookieParams['secure']
+		);
 	}
 
 }

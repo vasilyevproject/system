@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -34,17 +34,21 @@ class GenerateAction extends Action_Base {
 
 		$this->_controller->addOutput("Loading generator");
 		$generator = Billrun_Generator::getInstance($options);
+
+		if (!$generator) {
+			$this->_controller->addOutput("Generator cannot be loaded");
+			return;
+		}
 		$this->_controller->addOutput("Generator loaded");
 
-		if ($generator) {
-			$this->_controller->addOutput("Loading data to Generate...");
-			$generator->load();
-			$this->_controller->addOutput("Starting to Generate. This action can take a while...");
-			$generator->generate();
-			$this->_controller->addOutput("Finished generating.");
-		} else {
-			$this->_controller->addOutput("Generator cannot be loaded");
-		}
+		$this->_controller->addOutput("Loading data to Generate...");
+		$generator->load();
+		$this->_controller->addOutput("Starting to Generate. This action can take a while...");
+		$generator->generate();
+		$this->_controller->addOutput("Finished generating.");
+		$this->_controller->addOutput("Exporting the file");
+		$generator->move();
+		$this->_controller->addOutput("Finished exporting");
 	}
 
 }

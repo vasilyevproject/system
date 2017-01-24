@@ -2,14 +2,13 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
  * A Class to aggregate sequence data and check it`s validity.
  *
- * @author eran
  */
 class Billrun_Common_SequenceChecker {
 

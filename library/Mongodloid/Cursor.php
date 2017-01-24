@@ -2,7 +2,7 @@
 
 /**
  * @package         Mongodloid
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -14,20 +14,65 @@
 class Mongodloid_Cursor implements Iterator, Countable {
 
 	protected $_cursor;
+	protected $getRaw = FALSE;
 	
+	/**
+	 * Parameter to ensure valid construction.
+	 * @var boolean - True if cursor is valid.
+	 */
+	protected $_isValid = false;
+	
+	/**
+	 * Create a new instance of the cursor object.
+	 * @param MongoCursor $cursor - Mongo cursor pointing to a collection.
+	 * @param type $timeout
+	 */
 	public function __construct($cursor, $timeout = null) {
-		if ($cursor instanceof MongoCursor || (is_object($cursor) && get_class($cursor) == 'MongoCommandCursor')) {
-			$this->_cursor = $cursor;
-			if (!is_null($timeout)) {
-				$this->_cursor->timeout((int) $timeout);
-			}
+		// Check that the cursor is a mongocursor
+		if (!$this->validateInputCursor($cursor)) {
+			// TODO: Report error?
+			return;
 		}
+		$this->_cursor = $cursor;
+		
+		if (!is_null($timeout)) {
+			$this->_cursor->timeout((int) $timeout);
+		}
+		
+		if ($this->_cursor instanceof MongoCommandCursor) {
+			$this->rewind();
+			$this->valid();
+		}
+		
+		$this->_isValid = true;
 	}
 
+	/**
+	 * Check if input cursor is of mongo cursor type.
+	 * @param MongoCursor $cursor
+	 * @return type
+	 */
+	protected function validateInputCursor($cursor) {
+		return ($cursor) && ($cursor instanceof MongoCursor || (is_object($cursor) && get_class($cursor) == 'MongoCommandCursor'));
+	}
+	
+	/**
+	 * Checks if the cursor is valid.
+	 * @return boolean - true if the cursor is valid.
+	 * @todo Actually use this function in billrun code.
+	 */
+	public function isValid() {
+		return $this->_isValid;
+	}
+	
 	public function count($foundOnly = true) {
 		return $this->_cursor->count($foundOnly);
 	}
 
+	/**
+	 * 
+	 * @return \Mongodloid_Entity
+	 */
 	public function current() {
 		//If before the start of the vector move to the first element.
 		// 
@@ -35,7 +80,7 @@ class Mongodloid_Cursor implements Iterator, Countable {
 			$this->next();
 		}
 		
-		return new Mongodloid_Entity($this->_cursor->current());
+		return $this->getRaw ? $this->_cursor->current() :  new Mongodloid_Entity($this->_cursor->current(), null, false);
 	}
 
 	public function key() {
@@ -166,5 +211,11 @@ class Mongodloid_Cursor implements Iterator, Countable {
 		}
 		return $this;
 	}
+	
+	public function setRawReturn($enabled) {
+		$this->getRaw = $enabled;
+		
+		return $this;
+	} 
 
 }

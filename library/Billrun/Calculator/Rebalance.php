@@ -1,14 +1,16 @@
 <?php
 
-/*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
+/**
+ * @package         Billing
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
- * Description of Rebalance
+ * Rebalance calculator class for records
  *
- * @author shani
+ * @package  calculator
+ * @since    2.5
  */
 class Billrun_Calculator_Rebalance extends Billrun_Calculator {
 
@@ -19,7 +21,7 @@ class Billrun_Calculator_Rebalance extends Billrun_Calculator {
 	}
 
 	public function calc() {
-		Billrun_Factory::log()->log("Execute reset", Zend_Log::INFO);
+		Billrun_Factory::log("Execute reset", Zend_Log::INFO);
 
 		$rebalance_queue = Billrun_Factory::db()->rebalance_queueCollection();
 		$limit = Billrun_Config::getInstance()->getConfigValue('resetlines.limit', 10);
@@ -50,11 +52,11 @@ class Billrun_Calculator_Rebalance extends Billrun_Calculator {
 				}
 				$rebalance_queue->remove(array('sid' => array('$in' => $sids)));
 			} catch (Exception $exc) {
-				Billrun_Factory::log()->log('Error resetting sids ' . implode(',', $sids) . ' of billrun ' . $billrun_key . '. Error was ' . $exc->getTraceAsString(), Zend_Log::ALERT);
-				return $this->setError($exc->getTraceAsString(), array('sids' => $sids, 'billrun_key' => $billrun_key));
+				Billrun_Factory::log('Error resetting sids ' . implode(',', $sids) . ' of billrun ' . $billrun_key . '. Error was ' . $exc->getMessage() . ' : ' . $exc->getTraceAsString(), Zend_Log::ALERT);
+				return FALSE;
 			}
 		}
-		Billrun_Factory::log()->log("Success resetting sids " . implode(',', $all_sids), Zend_Log::INFO);
+		Billrun_Factory::log("Success resetting sids " . implode(',', $all_sids), Zend_Log::INFO);
 		return true;
 	}
 
@@ -79,6 +81,10 @@ class Billrun_Calculator_Rebalance extends Billrun_Calculator {
 	}
 
 	public function removeFromQueue() {
+		
+	}
+	
+	public function prepareData($lines) {
 		
 	}
 

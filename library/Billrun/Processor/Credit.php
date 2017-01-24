@@ -1,14 +1,16 @@
 <?php
 
-/*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
+/**
+ * @package         Billing
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
+ * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
- * Description of Credit
+ * Billing credit processor class
  *
- * @author Shani
+ * @package  Billing
+ * @since    2.0
  */
 class Billrun_Processor_Credit extends Billrun_Processor_Json {
 

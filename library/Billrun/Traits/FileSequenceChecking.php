@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -70,7 +70,7 @@ trait Billrun_Traits_FileSequenceChecking {
 		}
 		//If there were any errors log them as high issues 
 		if ($mailMsg) {
-			Billrun_Factory::log()->log($mailMsg, Zend_Log::ALERT);
+			Billrun_Factory::log($mailMsg, Zend_Log::ALERT);
 		}
 	}
 
@@ -98,7 +98,7 @@ trait Billrun_Traits_FileSequenceChecking {
 		$log = Billrun_Factory::db()->logCollection();
 		$lastLogFile = $log->query()->equals('source', $this->getName())->exists('received_time')
 				->equals('retrieved_from', $hostname)->
-				cursor()->sort(array('_id' => -1))->limit(1)->current();
+				cursor()->setReadPreference('RP_PRIMARY')->sort(array('_id' => -1))->limit(1)->current();
 
 		return isset($lastLogFile['file_name']) ? $lastLogFile['file_name'] : false;
 	}

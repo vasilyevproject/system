@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 require_once APPLICATION_PATH . '/application/controllers/Action/Api.php';
@@ -15,11 +15,13 @@ require_once APPLICATION_PATH . '/application/controllers/Action/Api.php';
  * @since    2.6
  */
 class RatesAction extends ApiAction {
+	use Billrun_Traits_Api_UserPermissions;
 
 	protected $model;
-	
+
 	public function execute() {
-		Billrun_Factory::log()->log("Execute rates api call", Zend_Log::INFO);
+		$this->allowed();
+		Billrun_Factory::log("Execute rates api call", Zend_Log::INFO);
 		$request = $this->getRequest();
 		$this->model = new RatesModel(array('sort' => array('provider' => 1, 'from' => 1)));
 
@@ -37,18 +39,18 @@ class RatesAction extends ApiAction {
 			),
 			'stampParams' => array($requestedQuery, $filter, $strip),
 		);
-		
-		$this->setCacheLifeTime(86400); // 1 day
+
+		$this->setCacheLifeTime(86400); // 1 day TODO: Use time utils.
 		$results = $this->cache($cacheParams);
-		
+
 		$this->getController()->setOutput(array(array(
 				'status' => 1,
 				'desc' => 'success',
 				'details' => $results,
 				'input' => $request->getRequest(),
-			)));
+		)));
 	}
-	
+
 	/**
 	 * basic fetch data method used by the cache
 	 * 
@@ -64,24 +66,23 @@ class RatesAction extends ApiAction {
 			$params['query'] = array();
 		}
 		$params['query']['$or'] = array(
-				array(
-					'hiddenFromApi' => array(
-						'$exists' => 0,
-					)
-				),
-				array(
-					'hiddenFromApi' => false
-				),
-				array(
-					'hiddenFromApi' => 0
+			array(
+				'hiddenFromApi' => array(
+					'$exists' => 0,
 				)
+			),
+			array(
+				'hiddenFromApi' => false
+			),
+			array(
+				'hiddenFromApi' => 0
+			)
 		);
 		$results = $this->model->getData($params['query'], $params['filter']);
 		if (isset($params['strip']) && !empty($params['strip'])) {
 			$results = $this->stripResults($results, $params['strip']);
 		}
 		return $results;
-
 	}
 
 	/**
@@ -94,10 +95,10 @@ class RatesAction extends ApiAction {
 		if (isset($query)) {
 			$retQuery = $this->getCompundParam($query, array());
 			$matches = preg_grep('/rates.\w+.plans/', array_keys($retQuery));
-			foreach($matches as $m) {
+			foreach ($matches as $m) {
 				$retQuery[$m] = $this->model->getPlan($retQuery[$m]);
 			}
-			
+
 			if (!isset($retQuery['from'])) {
 				$retQuery['from']['$lte'] = new MongoDate();
 			} else {
@@ -118,6 +119,7 @@ class RatesAction extends ApiAction {
 	 * @param type $fieldName the filed in the array to alter
 	 * @return the translated array
 	 */
+	// TODO: Moved this function to Billrun_Db.
 	protected function intToMongoDate($arr) {
 		if (is_array($arr)) {
 			foreach ($arr as $key => $value) {
@@ -159,8 +161,8 @@ class RatesAction extends ApiAction {
 	 * @return type
 	 */
 	protected function getCompundParam($param, $retParam = array()) {
-		if(isset($param)) {
-			$retParam =  $param ;
+		if (isset($param)) {
+			$retParam = $param;
 			if ($param !== FALSE) {
 				if (is_string($param)) {
 					$retParam = json_decode($param, true);
@@ -170,6 +172,10 @@ class RatesAction extends ApiAction {
 			}
 		}
 		return $retParam;
+	}
+
+	protected function getPermissionLevel() {
+		return Billrun_Traits_Api_IUserPermissions::PERMISSION_READ;
 	}
 
 }

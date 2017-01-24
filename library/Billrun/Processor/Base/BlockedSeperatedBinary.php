@@ -2,25 +2,24 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
  * Description of BlockedSeperatedFile
  *
- * @author eran
  */
 abstract class Billrun_Processor_Base_BlockedSeperatedBinary extends Billrun_Processor_Base_Binary {
 
 	public function process() {
 		if ($this->isQueueFull()) {
-			Billrun_Factory::log()->log("Billrun_Processor_Base_BlockedSeperatedBinary: queue size is too big", Zend_Log::ALERT);
+			Billrun_Factory::log("Billrun_Processor_Base_BlockedSeperatedBinary: queue size is too big", Zend_Log::ALERT);
 			return FALSE;
 		} else {
 			// run all over the file with the parser helper
 			if (!is_resource($this->fileHandler)) {
-				Billrun_Factory::log()->log("Resource is not configured well", Zend_Log::ERR);
+				Billrun_Factory::log("Resource is not configured well", Zend_Log::ERR);
 				return false;
 			}
 			$this->data['trailer'] = array();
@@ -30,7 +29,7 @@ abstract class Billrun_Processor_Base_BlockedSeperatedBinary extends Billrun_Pro
 
 			while (!$this->processFinished()) {
 				if ($this->parse() === FALSE) {
-					Billrun_Factory::log()->log("Billrun_Processor: cannot parse", Zend_Log::ERR);
+					Billrun_Factory::log("Billrun_Processor: cannot parse", Zend_Log::ERR);
 					return false;
 				}
 			}
@@ -42,19 +41,19 @@ abstract class Billrun_Processor_Base_BlockedSeperatedBinary extends Billrun_Pro
 			Billrun_Factory::dispatcher()->trigger('beforeProcessorStore', array($this));
 
 			if ($this->store() === FALSE) {
-				Billrun_Factory::log()->log("Billrun_Processor: cannot store the parser lines", Zend_Log::ERR);
+				Billrun_Factory::log("Billrun_Processor: cannot store the parser lines", Zend_Log::ERR);
 				return false;
 			}
 
 			if ($this->logDB() === FALSE) {
-				Billrun_Factory::log()->log("Billrun_Processor: cannot log parsing action", Zend_Log::WARN);
+				Billrun_Factory::log("Billrun_Processor: cannot log parsing action", Zend_Log::WARN);
 			}
 
 			Billrun_Factory::dispatcher()->trigger('afterProcessorStore', array($this));
 
 			$this->removefromWorkspace($this->getFileStamp());
 			Billrun_Factory::dispatcher()->trigger('afterProcessorRemove', array($this));
-			
+
 			return count($this->data['data']);
 		}
 	}

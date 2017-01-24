@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -66,6 +66,7 @@ class TableModel {
 	 * @var array extra columns to display in the table
 	 */
 	public $extra_columns;
+	protected $error;
 
 	/**
 	 * constructor
@@ -230,7 +231,7 @@ class TableModel {
 				<ul class="dropdown-menu">';
 		// TODO: move it to config
 		$ranges = array(
-			10, 50, 100, 500, 1000
+			10, 50, 100, 500, 1000, 10000
 		);
 		foreach ($ranges as $r) {
 			$ret .= '<li><a href="?listSize=' . $r . '">' . $r . '</a></li>';
@@ -242,6 +243,24 @@ class TableModel {
 		return $ret;
 	}
 
+	public function getItemByName($name, $field_name = 'name') {
+		if (!($this->collection instanceof Mongodloid_Collection)) {
+			return false;
+		}
+
+		$entity = $this->collection->query(array($field_name => $name))->cursor()->limit(1)->current();
+
+		// convert mongo values into javascript values
+		$entity['_id'] = (string) $entity['_id'];
+		if ($entity['from'] && isset($entity['from']->sec))
+			$entity['from'] = (new Zend_Date($entity['from']->sec))->getIso();
+		if ($entity['to'] && isset($entity['to']->sec))
+			$entity['to'] = (new Zend_Date($entity['to']->sec))->getIso();
+		if ($entity['creation_time'] && isset($entity['creation_time']->sec))
+			$entity['creation_time'] = (new Zend_Date($entity['creation_time']->sec))->getIso();
+		return $entity;
+	}
+
 	public function getItem($id) {
 		if (!($this->collection instanceof Mongodloid_Collection)) {
 			return false;
@@ -251,7 +270,12 @@ class TableModel {
 
 		// convert mongo values into javascript values
 		$entity['_id'] = (string) $entity['_id'];
-
+		if ($entity['from'] && isset($entity['from']->sec))
+			$entity['from'] = (new Zend_Date($entity['from']->sec))->getIso();
+		if ($entity['to'] && isset($entity['to']->sec))
+			$entity['to'] = (new Zend_Date($entity['to']->sec))->getIso();
+		if ($entity['creation_time'] && isset($entity['creation_time']->sec))
+			$entity['creation_time'] = (new Zend_Date($entity['creation_time']->sec))->getIso();
 		return $entity;
 	}
 
@@ -264,34 +288,56 @@ class TableModel {
 //		if (method_exists($this, $coll . 'BeforeDataSave')) {
 //			call_user_func_array(array($this, $coll . 'BeforeDataSave'), array($collection, &$newEntity));
 //		}
-		if (isset($params['_id'])) {
-			$entity = $this->collection->findOne($params['_id']);
-			$protected_keys = $this->getProtectedKeys($entity, "update");
-			$hidden_keys = $this->getHiddenKeys($entity, "update");
-			$raw_data = $entity->getRawData();
-			$new_data = array();
-			foreach ($protected_keys as $value) {
-				if (isset($raw_data[$value])) {
-					$new_data[$value] = $raw_data[$value];
-				}
-			}
-			foreach ($hidden_keys as $value) {
-				$new_data[$value] = $raw_data[$value];
-			}
-			foreach ($params as $key => $value) {
-				$new_data[$key] = $value;
-			}
-			$entity->setRawData($new_data);
-		} else {
+		if (!isset($params['_id'])) {
 			$entity = new Mongodloid_Entity($params);
+		} else {
+			$entity = $this->getEntityToUpdateById($params);
 		}
-		$entity->save($this->collection);
+		
+		$this->collection->save($entity, 1);
 //		if (method_exists($this, $coll . 'AfterDataSave')) {
 //			call_user_func_array(array($this, $coll . 'AfterDataSave'), array($collection, &$newEntity));
 //		}
 		return $entity;
 	}
 
+	/**
+	 * Get the entity object by the input _id value
+	 * @param arrray $params input params to return an entity by.
+	 * @return \Mongodloid_Entity
+	 */
+	protected function getEntityToUpdateById($params) {
+		$entity = $this->collection->findOne($params['_id']);
+		$protected_keys = $this->getProtectedKeys($entity, "update");
+		$hidden_keys = $this->getHiddenKeys($entity, "update");
+		$raw_data = $entity->getRawData();
+		$new_data = array();
+		foreach ($protected_keys as $value) {
+			if (isset($raw_data[$value])) {
+				$new_data[$value] = $raw_data[$value];
+			}
+		}
+		foreach ($hidden_keys as $value) {
+			$new_data[$value] = $raw_data[$value];
+		}
+		foreach ($params as $key => $value) {
+			if (in_array($key, array("to", "from")) && is_array($value)) {
+				if (get_class($value) !== 'MongoDate') {
+					//$value = new MongoDate((new Zend_Date($value['sec'], null, new Zend_Locale('he_IL')))->getTimestamp());
+					$value = new MongoDate($value['sec']);
+				}
+			} else if (in_array($key, array("to", "from"))) {
+				if (get_class($value) !== 'MongoDate') {
+					//$value = new MongoDate((new Zend_Date($value, null, new Zend_Locale('he_IL')))->getTimestamp());
+					$value = new MongoDate(strtotime($value));
+				}
+			}
+			$new_data[$key] = $value;
+		}
+		$entity->setRawData($new_data);
+		return $entity;
+	}
+	
 	public function getProtectedKeys($entity, $type) {
 		return array("_id");
 	}
@@ -347,18 +393,38 @@ class TableModel {
 						$value = Admin_Table::convertValueByCaseType($value, $filter_field['case_type']);
 					}
 					return array(
-						$filter_field['db_key'] => array('$regex' => strval($value)),
+						$filter_field['db_key'] => array('$regex' => new MongoRegex('/' . $value . '/i')),
 					);
 				}
 			}
 		} else if ($filter_field['input_type'] == 'date') {
-			if (is_string($value) && Zend_Date::isDate($value, 'yyyy-MM-dd hh:mm:ss')) { //yyyy-MM-dd hh:mm:ss
+			if (is_array($filter_field['db_key']) && is_string($value)) {
 				$value = new MongoDate((new Zend_Date($value, null, new Zend_Locale('he_IL')))->getTimestamp());
 				return array(
-					$filter_field['db_key'] => array(
-						$filter_field['comparison'] => $value
-					)
+					'$and' => array(
+						array(
+							$filter_field['db_key'][1] => array(
+								$filter_field['comparison'][1] => $value
+							),
+						),
+					),
 				);
+			} else {
+				if ($filter_field['db_key'] == 'to') {
+					$split = explode(' ', $value);
+					$value = $split[0] . ' 23:59:59';
+				} else if ($filter_field['db_key'] == 'from') {
+					$split = explode(' ', $value);
+					$value = $split[0] . ' 00:00:00';
+				}
+				if (is_string($value) && Zend_Date::isDate($value, 'yyyy-MM-dd hh:mm:ss')) { //yyyy-MM-dd hh:mm:ss
+					$value = new MongoDate((new Zend_Date($value, null, new Zend_Locale('he_IL')))->getTimestamp());
+					return array(
+						$filter_field['db_key'] => array(
+							$filter_field['comparison'] => $value
+						)
+					);
+				}
 			}
 		} else if ($filter_field['input_type'] == 'multiselect') {
 			if (isset($filter_field['ref_coll']) && isset($filter_field['ref_key'])) {
@@ -371,7 +437,7 @@ class TableModel {
 				$cursor = $collection->query($pre_query);
 				$value = array();
 				foreach ($cursor as $entity) {
-					$value[] = $entity->createRef($collection);
+					$value[] = $collection->createRefByEntity($entity);
 				}
 			}
 			if (is_array($value) && !empty($value)) {
@@ -423,15 +489,22 @@ class TableModel {
 	}
 
 	public function duplicate($params) {
-		$key = $params[$this->search_key];
-		$count = $this->collection
-			->query($this->search_key, $key)
-			->count();
+		// This already done from the controller
+//		$key = $params[$this->search_key];
 
-		if ($count) {
-			die(json_encode("key already exists"));
+//		if ($key) {
+//			$count = $this->collection
+//				->query($this->search_key, $key)
+//				->count();
+//			if ($count) {
+//				return $this->setError("key already exists");
+//			}
+//		}
+		if (isset($params['_id']->{'id'})) {
+			$params['source_id'] = (string) $params['_id']->{'$id'};
+		} else if (isset($params['_id'])) {
+			$params['source_id'] = (string) $params['_id'];
 		}
-		$params['source_id'] = $params['_id'];
 		unset($params['_id']);
 		return $this->update($params);
 	}
@@ -501,6 +574,15 @@ class TableModel {
 
 	protected function formatCsvCell($row, $header) {
 		return $row[$header];
+	}
+
+	protected function setError($str) {
+		$this->error = $str;
+		return false;
+	}
+
+	public function getError() {
+		return $this->error;
 	}
 
 }

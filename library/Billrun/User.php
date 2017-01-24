@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -35,13 +35,20 @@ class Billrun_User {
 	 * @param string $permission read/write/admin
 	 * @return boolean
 	 */
-	public function allowed($permission) {
+	public function allowed($permission, $page = null) {
+		if (isset($this->entity['roles'][$page])) {
+			return (boolean) array_intersect($this->entity['roles'][$page], array($permission, 'admin'));
+		}
 		return (boolean) array_intersect($this->entity['roles'], array($permission, 'admin'));
 	}
-	
+
 	public function valid() {
 		return !$this->entity->isEmpty();
 	}
+
+	public function getPermissions() {
+		return  isset($this->entity['roles']) ? $this->entity['roles'] : array();
+	}	
 	
 	public function getUsername() {
 		return $this->entity['username'];

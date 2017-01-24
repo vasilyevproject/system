@@ -2,15 +2,15 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
 /**
- * Billing calculator class for ilds records
+ * Billing calculator class for records
  *
  * @package  calculator
- * @since    0.5
+ * @since    5.0
  */
 class Billrun_Calculator_Customer extends Billrun_Calculator {
 
@@ -43,7 +43,7 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 	 * Whether or not to use the subscriber bulk API method
 	 * @var boolean
 	 */
-	protected $bulk = true;
+	protected $bulk = false;
 
 	/**
 	 * Extra customer fields to be saved by line type
@@ -52,22 +52,16 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 	protected $extraData = array();
 
 	/**
-	 * all international ggsn rates
-	 * @var array
+	 * Should the mandatory customer fields be overriden if they exist
+	 * @var boolean
 	 */
-	protected $intlGgsnRates = array();
-
-	/**
-	 *
-	 * @var type 
-	 */
-	protected $ratesModel;
+	protected $overrideMandatoryFields = TRUE;
 
 	public function __construct($options = array()) {
 		parent::__construct($options);
 
 		if (isset($options['calculator']['customer_identification_translation'])) {
-			$this->translateCustomerIdentToAPI = $options['calculator']['customer_identification_translation'];
+			$this->translateCustomerIdentToAPI = $this->getCustomerIdentificationTranslation();
 		}
 		if (isset($options['calculator']['bulk'])) {
 			$this->bulk = $options['calculator']['bulk'];
@@ -75,20 +69,23 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 		if (isset($options['calculator']['extra_data'])) {
 			$this->extraData = $options['calculator']['extra_data'];
 		}
+		if (isset($options['realtime'])) {
+			$this->overrideMandatoryFields = !boolval($options['realtime']);
+		}
+		if (isset($options['calculator']['override_mandatory_fields'])) {
+			$this->overrideMandatoryFields = boolval($options['calculator']['override_mandatory_fields']);
+		}
 
 		$this->subscriber = Billrun_Factory::subscriber();
 		$this->plans = Billrun_Factory::db()->plansCollection();
 		$this->lines_coll = Billrun_Factory::db()->linesCollection();
-
-		$this->loadIntlGgsnRates();
-		$this->ratesModel = new RatesModel();
 	}
 
 	/**
 	 * method to get calculator lines
 	 */
 	protected function getLines() {
-		return $this->getQueuedLines(array('type' => array('$in' => array('nsn', 'ggsn', 'smsc', 'mmsc', 'smpp', 'tap3', 'credit'))));
+		return $this->getQueuedLines(array());
 	}
 
 	protected function subscribersByStamp() {
@@ -102,17 +99,30 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 		}
 	}
 
+	
+	
+	public function prepareData($lines) {
+		if ($this->isBulk()) {
+			$this->loadSubscribers($lines);
+		}
+	}
+
 	/**
 	 * make the  calculation
 	 */
 	public function updateRow($row) {
-		Billrun_Factory::dispatcher()->trigger('beforeCalculatorUpdateRow', array($row, $this));
+		Billrun_Factory::dispatcher()->trigger('beforeCalculatorUpdateRow', array(&$row, $this));
 		$row->collection($this->lines_coll);
 		if ($this->isBulk()) {
 			$this->subscribersByStamp();
 			$subscriber = isset($this->subscribers[$row['stamp']]) ? $this->subscribers[$row['stamp']] : FALSE;
 		} else {
-			$subscriber = $this->loadSubscriberForLine($row);
+			if ($this->loadSubscriberForLine($row)) {
+				$subscriber = $this->subscriber;
+			} else {
+				Billrun_Factory::log('Error loading subscriber for row ' . $row->get('stamp'), Zend_Log::NOTICE);
+				return false;
+			}
 		}
 		if (!$subscriber || !$subscriber->isValid()) {
 			if ($this->isOutgoingCall($row)) {
@@ -126,26 +136,44 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 
 		foreach (array_keys($subscriber->getAvailableFields()) as $key) {
 			if (is_numeric($subscriber->{$key})) {
-				$subscriber->{$key} = intval($subscriber->{$key}); // remove this conversion when Vitali changes the output of the CRM to integers
+				$subscriber->{$key} = intval($subscriber->{$key}); // remove this conversion when the CRM output contains integers
 			}
 			$subscriber_field = $subscriber->{$key};
-			$row[$key] = $subscriber_field;
+			if (is_array($row[$key]) && (is_array($subscriber_field) || is_null($subscriber_field))) {
+				$row[$key] = array_merge($row[$key], is_null($subscriber_field) ? array() : $subscriber_field);
+			} else {
+				$row[$key] = $subscriber_field;
+			}
 		}
+		
 		foreach (array_keys($subscriber->getCustomerExtraData())as $key) {
 			if ($this->isExtraDataRelevant($row, $key)) {
 				$subscriber_field = $subscriber->{$key};
-				$row[$key] = $subscriber_field;
-				if ($key == 'last_vlr') { // also it's possible to add alpha3 only if daily_ird_plan is true
-					if ($subscriber->{$key}) {
-						$rate = $this->ratesModel->getRateByVLR($subscriber->{$key});
-						if ($rate) {
-							$row['alpha3'] = $rate['alpha3'];
-						}
-					}
+				if (is_array($row[$key]) && (is_array($subscriber_field) || is_null($subscriber_field))) { // if existing value is array and in input value is array let's do merge
+					$row[$key] = array_merge($row[$key], is_null($subscriber_field) ? array() : $subscriber_field);
+				} else {
+					$row[$key] = $subscriber_field;
 				}
 			}
 		}
-		Billrun_Factory::dispatcher()->trigger('afterCalculatorUpdateRow', array($row, $this));
+
+		$plan = Billrun_Factory::plan(array('name' => $row['plan'], 'time' => $row['urt']->sec));
+		$plan_ref = $plan->createRef();
+		if (is_null($plan_ref)) {
+			Billrun_Factory::log('No plan found for subscriber ' . $row['sid'], Zend_Log::ALERT);
+			$row['usagev'] = 0;
+			$row['apr'] = 0;
+			return false;
+		}
+		
+		foreach ($plan->getFieldsForLine() as $lineKey => $planKey) {
+			if (!empty($planField = $plan->get($planKey))) {
+				$row[$lineKey] = $planField;
+			}
+		}
+		$row['plan_ref'] = $plan_ref;
+
+		Billrun_Factory::dispatcher()->trigger('afterCalculatorUpdateRow', array(&$row, $this));
 		return $row;
 	}
 
@@ -179,7 +207,7 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 		$save = array(
 			'$set' => array(),
 		);
-		$saveProperties = array_merge(array('last_vlr', 'alpha3'), array_keys(Billrun_Factory::subscriber()->getAvailableFields()), array_keys(Billrun_Factory::subscriber()->getCustomerExtraData()));
+		$saveProperties = $this->getPossiblyUpdatedFields();
 		foreach ($saveProperties as $p) {
 			if (!is_null($val = $line->get($p, true))) {
 				$save['$set'][$p] = $val;
@@ -189,14 +217,37 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 		if (count($save['$set'])) {
 			$where = array('stamp' => $line['stamp']);
 			Billrun_Factory::db()->linesCollection()->update($where, $save);
+			Billrun_Factory::db()->queueCollection()->update($where, $save);
 		}
 
-		if (!isset($line['usagev']) || $line['usagev'] === 0) {
+		if ((!isset($line['usagev']) || $line['usagev'] === 0) && !$this->shouldUsagevBeZero($line)) {
 			$this->removeLineFromQueue($line);
 			unset($this->data[$dataKey]);
 		}
 
 		Billrun_Factory::dispatcher()->trigger('afterCalculatorWriteLine', array('data' => $line, 'calculator' => $this));
+	}
+	
+	/**
+	 * in some realtime cases a line usagev should be zero
+	 * 
+	 * @param type $line
+	 * @return boolean
+	 * @todo add logic
+	 */
+	protected function shouldUsagevBeZero($line) {
+		return $line['realtime'] && $line['request_type'] == intval(Billrun_Factory::config()->getConfigValue('realtimeevent.requestType.FINAL_REQUEST'));
+	}
+
+	public function getPossiblyUpdatedFields() {
+		return array_merge($this->getCustomerPossiblyUpdatedFields(), array('granted_return_code', 'usagev'));
+	}
+
+	public function getCustomerPossiblyUpdatedFields() {
+		$subscriber = Billrun_Factory::subscriber();
+		$availableFileds = array_keys($subscriber->getAvailableFields());
+		$customerExtraData = array_keys($subscriber->getCustomerExtraData());
+		return array_merge($availableFileds, $customerExtraData, array('subscriber_lang', 'plan_ref'));
 	}
 
 	/**
@@ -227,7 +278,7 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 				if (count($line_params) == 0) {
 					Billrun_Factory::log('Couldn\'t identify caller for line of stamp ' . $row['stamp'], Zend_Log::ALERT);
 				} else {
-					$line_params['time'] = date(Billrun_Base::base_dateformat, $row['urt']->sec);
+					$line_params['time'] = date(Billrun_Base::base_datetimeformat, $row['urt']->sec);
 					$line_params['stamp'] = $row['stamp'];
 					$line_params['EXTRAS'] = 0;
 					foreach ($subscriber_extra_data as $key) {
@@ -252,26 +303,43 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 		$params = $this->getIdentityParams($row);
 
 		if (count($params) == 0) {
-			Billrun_Factory::log('Couldn\'t identify caller for line of stamp ' . $row->get('stamp'), Zend_Log::ALERT);
+			Billrun_Factory::log('Couldn\'t identify subscriber for line of stamp ' . $row->get('stamp'), Zend_Log::ALERT);
 			return;
 		}
 
-		$params['time'] = date(Billrun_Base::base_dateformat, $row->get('urt')->sec);
+		$params['time'] = date(Billrun_Base::base_datetimeformat, $row->get('urt')->sec);
 		$params['stamp'] = $row->get('stamp');
 
 		return $this->subscriber->load($params);
 	}
-
+	
 	protected function getIdentityParams($row) {
 		$params = array();
-		$customer = $this->isOutgoingCall($row) ? "caller" : "callee";
-		$customer_identification_translation = $this->translateCustomerIdentToAPI[$customer];
-		foreach ($customer_identification_translation as $key => $toKey) {
-			if (isset($row[$key])) {
-				$params[$toKey['toKey']] = preg_replace($toKey['clearRegex'], '', $row[$key]);
-				//$this->subscriberNumber = $params[$toKey['toKey']];
-				Billrun_Factory::log("found identification for row: {$row['stamp']} from {$key} to " . $toKey['toKey'] . ' with value:' . $params[$toKey['toKey']], Zend_Log::DEBUG);
+		$customer_identification_translation = Billrun_Util::getFieldVal($this->translateCustomerIdentToAPI[$row['type']], array());
+		foreach ($customer_identification_translation as $translationRules) {
+			if (!empty($translationRules['conditions'])) {
+				foreach ($translationRules['conditions'] as $condition) {
+					if (!preg_match($condition['regex'], $row[$condition['field']])) {
+						continue 2;
+					}
+				}
+			}
+			$key = $translationRules['src_key'];
+			if (isset($row['uf'][$key])) {
+				if (isset($translationRules['clear_regex'])) {
+					$params[$translationRules['target_key']] = preg_replace($translationRules['clear_regex'], '', $row['uf'][$key]);
+				} else {
+					if ($translationRules['target_key'] === 'msisdn') {
+						$params[$translationRules['target_key']] = Billrun_Util::msisdn($row['uf'][$key]);
+					} else {
+						$params[$translationRules['target_key']] = $row['uf'][$key];
+					}
+				}
+				Billrun_Factory::log("found identification for row: {$row['stamp']} from {$key} to " . $translationRules['target_key'] . ' with value: ' . $params[$translationRules['target_key']], Zend_Log::DEBUG);
 				break;
+			}
+			else {
+				Billrun_Factory::log('Customer calculator missing field ' . $key . ' for line with stamp ' . $row['stamp'], Zend_Log::ALERT);
 			}
 		}
 		return $params;
@@ -314,18 +382,31 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 	 * @see Billrun_Calculator::isLineLegitimate
 	 */
 	public function isLineLegitimate($line) {
-		if (isset($line['usagev']) && $line['usagev'] !== 0 && $this->isCustomerable($line)) {
-			$customer = $this->isOutgoingCall($line) ? "caller" : "callee";
-			if (isset($this->translateCustomerIdentToAPI[$customer])) {
-				$customer_identification_translation = $this->translateCustomerIdentToAPI[$customer];
-				foreach ($customer_identification_translation as $key => $toKey) {
-					if (isset($line[$key]) && strlen($line[$key])) {
-						return true;
-					}
-				}
-			}
-		}
-		return false;
+//		if ($this->isCustomerable($line)) {
+//			if (!$this->overrideMandatoryFields) {
+//				$validSubscriber = TRUE;
+//				foreach ($this->subscriber->getAvailableFields() as $requiredField) {
+//					if (!isset($line[$requiredField]) || is_null($line[$requiredField])) {
+//						$validSubscriber = FALSE;
+//						break;
+//					}
+//				}
+//				if ($validSubscriber) {
+//					return FALSE;
+//				}
+//			}
+//			$customer = $this->isOutgoingCall($line) ? "caller" : "callee";
+//			if (isset($this->translateCustomerIdentToAPI[$customer])) {
+//				$customer_identification_translation = $this->translateCustomerIdentToAPI[$customer];
+//				foreach ($customer_identification_translation as $key => $toKey) {
+//					if (isset($line[$key]) && strlen($line[$key])) {
+//						return true;
+//					}
+//				}
+//			}
+//		}
+//		return false;
+		return true;
 	}
 
 	protected function isCustomerable($line) {
@@ -333,23 +414,16 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 			$record_type = $line['record_type'];
 			if ($record_type == '11' || $record_type == '12') {
 				$relevant_cg = $record_type == '11' ? $line['in_circuit_group'] : $line['out_circuit_group'];
-				if (!($relevant_cg == "1001" || $relevant_cg == "1006" || ($relevant_cg >= "1201" && $relevant_cg <= "1209"))) {
+				if (!in_array($relevant_cg, Billrun_Util::getRoamingCircuitGroups())) {
 					return false;
 				}
 				if ($record_type == '11' && in_array($line['out_circuit_group'], array('3060', '3061'))) {
 					return false;
 				}
-				// what about GOLAN IN direction (3060/3061)?
+				// what about IN direction (3060/3061)?
 			} else if (!in_array($record_type, array('01', '02'))) {
 				return false;
 			}
-		} else {
-			if (is_array($line)) {
-				$arate = $line['arate'];
-			} else {
-				$arate = $line->get('arate', true);
-			}
-			return (isset($arate) && $arate); // for non-nsn records we currently identify only outgoing usage, based on arate.
 		}
 		return true;
 	}
@@ -364,6 +438,9 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 		if ($line['type'] == 'nsn') {
 			$outgoing = in_array($line['record_type'], array('01', '11'));
 		}
+		if (in_array($line['usaget'], Billrun_Factory::config()->getConfigValue('realtimeevent.incomingCallUsageTypes', array()))) {
+			return false;
+		}
 		return $outgoing;
 	}
 
@@ -377,10 +454,20 @@ class Billrun_Calculator_Customer extends Billrun_Calculator {
 				'$ne' => 'INTERNET_BILL_BY_VOLUME',
 			),
 		);
-		$rates = $rates_coll->query($query)->cursor()->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'));
+		$rates = $rates_coll->query($query)->cursor();
 		foreach ($rates as $rate) {
 			$this->intlGgsnRates[strval($rate->getId())] = $rate;
 		}
+	}
+	
+	protected function getCustomerIdentificationTranslation() {
+		$customerIdentificationTranslation = array();
+		foreach (Billrun_Factory::config()->getConfigValue('file_types', array()) as $fileSettings) {
+			if (!empty($fileSettings['customer_identification_fields'])) {
+				$customerIdentificationTranslation[$fileSettings['file_type']] = $fileSettings['customer_identification_fields'];
+			}
+		}
+		return $customerIdentificationTranslation;
 	}
 
 }

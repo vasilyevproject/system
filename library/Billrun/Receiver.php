@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -41,8 +41,8 @@ abstract class Billrun_Receiver extends Billrun_Base {
 	public function __construct($options = array()) {
 		parent::__construct($options);
 
-		if (isset($options['filename_regex'])) {
-			$this->filenameRegex = $options['filename_regex'];
+		if (isset($options['filename_regex']) || isset($options['receiver']['filename_regex'])) {
+			$this->filenameRegex = isset($options['receiver']['filename_regex']) ? $options['receiver']['filename_regex'] : $options['filename_regex'];
 		}
 		if (isset($options['receiver']['limit']) && $options['receiver']['limit']) {
 			$this->setLimit($options['receiver']['limit']);
@@ -51,21 +51,23 @@ abstract class Billrun_Receiver extends Billrun_Base {
 			$this->preserve_timestamps = $options['receiver']['preserve_timestamps'];
 		}
 		if (isset($options['backup_path'])) {
-			$this->backupPaths = $options['backup_path'];
+			$this->backupPaths = Billrun_Util::getBillRunSharedFolderPath($options['backup_path']);
 		} else {
-			$this->backupPaths = Billrun_Factory::config()->getConfigValue($this->getType() . '.backup_path', array('./backups/' . $this->getType()));
+			$this->backupPaths = Billrun_Util::getBillRunSharedFolderPath(Billrun_Factory::config()->getConfigValue($this->getType() . '.backup_path', array('./backups/' . $this->getType())));
 		}
 		if (isset($options['receiver']['backup_granularity']) && $options['receiver']['backup_granularity']) {
 			$this->setGranularity((int) $options['receiver']['backup_granularity']);
 		}
-		
-		if (Billrun_Util::getFieldVal($options['receiver']['backup_date_fromat'],false) ) {
-			$this->setBackupDateDirFromat( $options['receiver']['backup_date_fromat']);
+
+		if (Billrun_Util::getFieldVal($options['receiver']['backup_date_format'], false)) {
+			$this->setBackupDateDirFromat($options['receiver']['backup_date_format']);
+		}
+
+		if (isset($options['receiver']['orphan_time']) && ((int) $options['receiver']['orphan_time']) > 900) {
+			$this->file_fetch_orphan_time = $options['receiver']['orphan_time'];
 		}
 		
-		if (isset($options['receiver']['orphan_time']) && ((int) $options['receiver']['orphan_time']) > 900 ) {
-			$this->file_fetch_orphan_time =  $options['receiver']['orphan_time'];
-		}
+		$this->workspace = Billrun_Util::getBillRunSharedFolderPath(Billrun_Util::getFieldVal($options['workspace'], 'workspace'));
 	}
 
 	/**
@@ -81,17 +83,16 @@ abstract class Billrun_Receiver extends Billrun_Base {
 	 * @todo refactoring this method
 	 */
 	protected function logDB($fileData) {
-		$log = Billrun_Factory::db()->logCollection();
 		Billrun_Factory::dispatcher()->trigger('beforeLogReceiveFile', array(&$fileData, $this));
-		
+
 		$query = array(
-			'stamp' =>  $fileData['stamp'],
+			'stamp' => $fileData['stamp'],
 			'received_time' => array('$exists' => false)
 		);
-	
+
 		$addData = array(
 			'received_hostname' => Billrun_Util::getHostName(),
-			'received_time' => date(self::base_dateformat),
+			'received_time' => date(self::base_datetimeformat),
 		);
 
 		$update = array(
@@ -99,16 +100,17 @@ abstract class Billrun_Receiver extends Billrun_Base {
 		);
 
 		if (empty($query['stamp'])) {
-			Billrun_Factory::log()->log("Billrun_Receiver::logDB - got file with empty stamp :  {$fileData['stamp']}", Zend_Log::NOTICE);
+			Billrun_Factory::log("Billrun_Receiver::logDB - got file with empty stamp :  {$fileData['stamp']}", Zend_Log::NOTICE);
 			return FALSE;
 		}
 
-		$result = $log->update($query, $update, array('w' => 1));
+		$log = Billrun_Factory::db()->logCollection();
+		$result = $log->update($query, $update);
 
 		if ($result['ok'] != 1 || $result['n'] != 1) {
-			Billrun_Factory::log()->log("Billrun_Receiver::logDB - Failed when trying to update a file log record " . $fileData['file_name'] . " with stamp of : {$fileData['stamp']}", Zend_Log::NOTICE);
+			Billrun_Factory::log("Billrun_Receiver::logDB - Failed when trying to update a file log record " . $fileData['file_name'] . " with stamp of : {$fileData['stamp']}", Zend_Log::NOTICE);
 		}
-		
+
 		return $result['n'] == 1 && $result['ok'] == 1;
 	}
 

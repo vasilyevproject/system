@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -42,40 +42,11 @@ class LinesModel extends TableModel {
 	 * @param array $entity
 	 * 
 	 * @return type
-	 * @todo move to model
 	 */
 	public function getItem($id) {
 
 		$entity = parent::getItem($id);
-
-		if (isset($entity['urt'])) {
-			$entity['urt'] = (new Zend_Date($entity['urt']->sec, null, new Zend_Locale('he_IL')))->getIso();
-		}
-		if (isset($entity['arate'])) {
-			$data = $entity->get('arate', false);
-			if ($data instanceof Mongodloid_Entity) {
-				$entity['arate'] = $data->get('key');
-			}
-		}
-		if (isset($entity['pzone'])) {
-			$data = $entity->get('pzone', false);
-			if ($data instanceof Mongodloid_Entity) {
-				$entity['pzone'] = $data->get('key');
-			}
-		}
-		if (isset($entity['wsc'])) {
-			$data = $entity->get('wsc', false);
-			if ($data instanceof Mongodloid_Entity) {
-				$entity['wsc'] = $data->get('key');
-			}
-		}
-		if (isset($entity['wsc_in'])) {
-			$data = $entity->get('wsc_in', false);
-			if ($data instanceof Mongodloid_Entity) {
-				$entity['wsc_in'] = $data->get('key');
-			}
-		}
-
+		Admin_Table::setEntityFields($entity);
 		return $entity;
 	}
 
@@ -89,27 +60,26 @@ class LinesModel extends TableModel {
 		if (isset($data['arate'])) {
 			$ratesColl = Billrun_Factory::db()->ratesCollection();
 			$rateEntity = $ratesColl->query('key', $data['arate'])
-							->lessEq('from', $currentDate)
-							->greaterEq('to', $currentDate)
-							->cursor()->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'))->current();
-			$data['arate'] = $rateEntity->createRef($ratesColl);
+					->lessEq('from', $currentDate)
+					->greaterEq('to', $currentDate)
+					->cursor()->current();
+			$data['arate'] = $ratesColl->createRefByEntity($rateEntity);
 		}
 		if (isset($data['plan'])) {
 			$plansColl = Billrun_Factory::db()->plansCollection();
 			$planEntity = $plansColl->query('name', $data['plan'])
-							->lessEq('from', $currentDate)
-							->greaterEq('to', $currentDate)
-							->cursor()->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'))->current();
-			$data['plan_ref'] = $planEntity->createRef($plansColl);
+					->lessEq('from', $currentDate)
+					->greaterEq('to', $currentDate)
+					->cursor()->current();
+			$data['plan_ref'] = $plansColl->createRefByEntity($planEntity);
 		}
 		parent::update($data);
 	}
-	
+
 	public function getData($filter_query = array()) {
 
 		$cursor = $this->collection->query($filter_query)->cursor()
-			->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'))
-			->sort($this->sort)->skip($this->offset())->limit($this->size);
+				->sort($this->sort)->skip($this->offset())->limit($this->size);
 
 		if (isset($filter_query['$and']) && $this->filterExists($filter_query['$and'], array('aid', 'sid', 'stamp'))) {
 			$this->_count = $cursor->count(false);
@@ -126,11 +96,22 @@ class LinesModel extends TableModel {
 			} else {
 				$item['arate'] = $arate;
 			}
+//			if (isset($item['source_ref'])) {
+//				$source_ref = $item->get('source_ref', false)->getRawData();
+//				$item['source_ref'] = $source_ref['name'];
+//				unset($entity['source_ref']['_id']);
+//			}
+			if (isset($item['rat_type'])) {
+				$item['rat_type'] = Admin_Table::translateField($item, 'rat_type');
+			}
+			
+			$callingCalledFieldName = (in_array($item['usaget'], Billrun_Factory::config()->getConfigValue('realtimeevent.incomingCallUsageTypes', array())) ? 'calling_number' : 'called_number');
+			$item['called_calling'] = $item[$callingCalledFieldName];
 			$ret[] = $item;
 		}
 		return $ret;
 	}
-	
+
 	/**
 	 * method to get data aggregated
 	 * 
@@ -163,7 +144,6 @@ class LinesModel extends TableModel {
 		return $ret;
 	}
 
-	
 	public function getDistinctField($field, $filter_query = array()) {
 		if (empty($field) || empty($filter_query)) {
 			return array();
@@ -171,24 +151,17 @@ class LinesModel extends TableModel {
 		return $this->collection->distinct($field, $filter_query);
 	}
 
-	public function getTableColumns() {
-		$columns = array(
-			'type' => 'Type',
-			'aid' => 'Account',
-			'sid' => 'Subscriber',
-			'calling_number' => 'Calling',
-			'called_number' => 'Called',
-			'plan' => 'Plan',
-			'usaget' => 'Usage',
-			'usagev' => 'Volume',
-			'arate' => 'Rate',
-			'aprice' => 'Charge',
-			'billrun' => 'Billrun',
-			'urt' => 'Time',
-		);
+	public function getTableColumns($remove_info_columns = false) {
+		$columns = parent::getTableColumns();
 		if (!empty($this->extra_columns)) {
 			$extra_columns = array_intersect_key($this->getExtraColumns(), array_fill_keys($this->extra_columns, ""));
 			$columns = array_merge($columns, $extra_columns);
+		}
+		if ($remove_info_columns) {
+			$removable_fields = Billrun_Factory::config()->getConfigValue('admin_panel.lines.removable_columns', []);
+			foreach ($removable_fields as $removable_field) {
+				unset($columns[$removable_field]);
+			}
 		}
 		return $columns;
 	}
@@ -198,33 +171,48 @@ class LinesModel extends TableModel {
 		$billruns = array();
 		$timestamp = time();
 		for ($i = 0; $i < $months; $i++) {
-			$billrun_key = Billrun_Util::getBillrunKey($timestamp);
+			$billrun_key = Billrun_Billingcycle::getBillrunKeyByTimestamp($timestamp);
 			if ($billrun_key >= '201401') {
 				$billruns[$billrun_key] = $billrun_key;
-			}
-			else {
+			} else {
 				break;
 			}
 			$timestamp = strtotime("1 month ago", $timestamp);
 		}
 		arsort($billruns);
 
+		$names = Billrun_Factory::db()->plansCollection()->query(array('type' => 'customer'))->cursor()->sort(array('name' => 1));
+		$planNames = array();
+		foreach ($names as $name) {
+			$planNames[$name['name']] = $name['name'];
+		}
+
+
 		$filter_fields = array(
-			'aid' => array(
-				'key' => 'aid',
-				'db_key' => 'aid',
-				'input_type' => 'number',
-				'comparison' => 'equals',
-				'display' => 'Account id',
-				'default' => '',
-			),
 			'sid' => array(
 				'key' => 'sid',
 				'db_key' => 'sid',
 				'input_type' => 'number',
 				'comparison' => 'equals',
-				'display' => 'Subscriber id',
+				'display' => 'Subscriber No',
 				'default' => '',
+			),
+			'aid' => array(
+				'key' => 'aid',
+				'db_key' => 'aid',
+				'input_type' => 'number',
+				'comparison' => 'equals',
+				'display' => 'BAN',
+				'default' => '',
+			),
+			'plan' => array(
+				'key' => 'plan',
+				'db_key' => 'plan',
+				'input_type' => 'multiselect',
+				'comparison' => '$in',
+				'display' => 'Plan',
+				'values' => $planNames,
+				'default' => array(),
 			),
 			'from' => array(
 				'key' => 'from',
@@ -247,19 +235,19 @@ class LinesModel extends TableModel {
 				'db_key' => 'usaget',
 				'input_type' => 'multiselect',
 				'comparison' => '$in',
-				'display' => 'Usage',
+				'display' => 'Activity',
 				'values' => Billrun_Factory::config()->getConfigValue('admin_panel.line_usages'),
 				'default' => array(),
 			),
-			'billrun' => array(
-				'key' => 'billrun',
-				'db_key' => 'billrun',
-				'input_type' => 'multiselect',
-				'comparison' => '$in',
-				'display' => 'Billrun',
-				'values' => $billruns,
-				'default' => array(),
-			),
+//			'billrun' => array(
+//				'key' => 'billrun',
+//				'db_key' => 'billrun',
+//				'input_type' => 'multiselect',
+//				'comparison' => '$in',
+//				'display' => 'Billrun',
+//				'values' => $billruns,
+//				'default' => array(),
+//			),
 		);
 		return array_merge($filter_fields, parent::getFilterFields());
 	}
@@ -269,7 +257,8 @@ class LinesModel extends TableModel {
 			if ($filter_field['input_type'] == 'boolean') {
 				if (!is_null($value) && $value != $filter_field['default']) {
 					$rates_coll = Billrun_Factory::db()->ratesCollection();
-					$unrated_rate = $rates_coll->query("key", "UNRATED")->cursor()->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'))->current()->createRef($rates_coll);
+					// TODO: Shouldn't ->cursor()->crurrent() be validated?
+					$unrated_rate = $rates_coll->createRefByEntity($rates_coll->query("key", "UNRATED")->cursor()->current());
 					$month_ago = new MongoDate(strtotime("1 month ago"));
 					return array(
 						'$or' => array(
@@ -304,26 +293,29 @@ class LinesModel extends TableModel {
 	public function getFilterFieldsOrder() {
 		$filter_field_order = array(
 			0 => array(
-				'aid' => array(
-					'width' => 2,
-				),
 				'sid' => array(
 					'width' => 2,
 				),
+				'aid' => array(
+					'width' => 2,
+				),
+				'plan' => array(
+					'width' => 2,
+				)
+			),
+			1 => array(
 				'from' => array(
 					'width' => 2,
 				),
 				'to' => array(
 					'width' => 2,
 				),
-			),
-			1 => array(
 				'usage' => array(
 					'width' => 2,
 				),
-				'billrun' => array(
-					'width' => 2,
-				),
+//				'billrun' => array(
+//					'width' => 2,
+//				),
 			),
 		);
 		return $filter_field_order;
@@ -331,12 +323,12 @@ class LinesModel extends TableModel {
 
 	public function getSortFields() {
 		return array(
-			'aid' => 'Account id',
-			'billrun_key' => 'Billrun',
+			'aid' => 'BAN',
+//			'billrun_key' => 'Billrun',
 			'aprice' => 'Charge',
 			'plan' => 'Plan',
 			'process_time' => 'Process time',
-			'sid' => 'Subscriber id',
+			'sid' => 'Subscriber No',
 			'urt' => 'Time',
 			'type' => 'Type',
 			'usaget' => 'Usage type',
@@ -345,31 +337,32 @@ class LinesModel extends TableModel {
 	}
 
 	protected function formatCsvCell($row, $header) {
-		if (($header == 'from' || $header == 'to' || $header == 'urt' || $header == 'notify_time') && $row) {
-			if (!empty($row["tzoffset"])) {
-				// TODO change this to regex; move it to utils
-				$tzoffset = $row['tzoffset'];
-				$sign = substr($tzoffset, 0, 1);
-				$hours = substr($tzoffset, 1, 2);
-				$minutes = substr($tzoffset, 3, 2);
-				$time = $hours . ' hours ' . $minutes . ' minutes';
-				if ($sign == "-") {
-					$time .= ' ago';
-				}
-				$timsetamp = strtotime($time, $row['urt']->sec);
-				$zend_date = new Zend_Date($timsetamp);
-				$zend_date->setTimezone('UTC');
-				return $zend_date->toString("d/M/Y H:m:s") . $row['tzoffset'];
-			} else {
-				$zend_date = new Zend_Date($row[$header]->sec);
-				return $zend_date->toString("d/M/Y H:m:s");
-			}
-		} else {
+		$headerValues = array('from', 'to', 'urt', 'notify_time');
+
+		if (!in_array($header, $headerValues) || !$row) {
 			return parent::formatCsvCell($row, $header);
 		}
 
+		if (empty($row["tzoffset"])) {
+			$zend_date = new Zend_Date($row[$header]->sec);
+			return $zend_date->toString("d/M/Y H:m:s");
+		}
+
+		// TODO change this to regex; move it to utils
+		$tzoffset = $row['tzoffset'];
+		$sign = substr($tzoffset, 0, 1);
+		$hours = substr($tzoffset, 1, 2);
+		$minutes = substr($tzoffset, 3, 2);
+		$time = $hours . ' hours ' . $minutes . ' minutes';
+		if ($sign == "-") {
+			$time .= ' ago';
+		}
+		$timsetamp = strtotime($time, $row['urt']->sec);
+		$zend_date = new Zend_Date($timsetamp);
+		$zend_date->setTimezone('UTC');
+		return $zend_date->toString("d/M/Y H:m:s") . $row['tzoffset'];
 	}
-	
+
 	public function getActivity($sids, $from_date, $to_date, $include_outgoing, $include_incoming, $include_sms) {
 		if (!is_array($sids)) {
 			settype($sids, 'array');
@@ -380,19 +373,19 @@ class LinesModel extends TableModel {
 			),
 			'usaget' => array('$in' => array()),
 		);
-		
+
 		if ($include_incoming) {
 			$query['usaget']['$in'][] = 'incoming_call';
 		}
-		
+
 		if ($include_outgoing) {
 			$query['usaget']['$in'][] = 'call';
 		}
-		
+
 		if ($include_sms) {
 			$query['usaget']['$in'][] = 'sms';
 		}
-		
+
 		$query['urt'] = array(
 			'$lte' => new MongoDate($to_date),
 			'$gte' => new MongoDate($from_date),
@@ -400,21 +393,24 @@ class LinesModel extends TableModel {
 
 		$cursor = $this->collection->query($query)->cursor()->limit(100000)->sort(array('urt' => 1));
 		$ret = array();
-		
-		foreach($cursor as $row) {
+
+		foreach ($cursor as $row) {
 			$ret[] = array(
-				'date' => date(Billrun_Base::base_dateformat, $row['urt']->sec),
+				'date' => date(Billrun_Base::base_datetimeformat, $row['urt']->sec),
 				'called_number' => $row['called_number'],
 				'calling_number' => $row['calling_number'],
 				'usagev' => $row['usagev'],
 				'usaget' => $row['usaget'],
+				'calling_subs_first_ci' => $row['calling_subs_first_ci'],
+				'called_subs_first_ci' => $row['called_subs_first_ci'],
+				'calling_subs_first_lac' => $row['calling_subs_first_lac'],
+				'called_subs_first_lac' => $row['called_subs_first_lac'],
 			);
 		}
-		
-		return $ret;
 
+		return $ret;
 	}
-	
+
 	public function remove($params) {
 		// first remove line from queue (collection) than from lines collection (parent)
 		Billrun_Factory::db()->queueCollection()->remove($params);

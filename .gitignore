@@ -1,4 +1,5 @@
 /.directory
+.idea/*
 backups
 backup
 exports
@@ -9,3 +10,9 @@ mongo/*.json
 exports
 logs/debug.log*
 cache
+crontab
+conf/dori.ini
+/nbproject/
+/conf/tenants/*
+/scripts/locks/*
+shared

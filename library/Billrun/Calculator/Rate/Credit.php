@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -28,8 +28,9 @@ class Billrun_Calculator_Rate_Credit extends Billrun_Calculator_Rate {
 
 	/**
 	 * @see Billrun_Calculator_Rate::getLineVolume
+	 * @deprecated since version 2.9
 	 */
-	protected function getLineVolume($row, $usage_type) {
+	protected function getLineVolume($row) {
 		return $row['amount_without_vat'];
 	}
 
@@ -43,7 +44,7 @@ class Billrun_Calculator_Rate_Credit extends Billrun_Calculator_Rate {
 	/**
 	 * @see Billrun_Calculator_Rate::getLineRate
 	 */
-	protected function getLineRate($row, $usage_type) {
+	protected function getLineRate($row) {
 
 		$rate_key = $row['vatable'] ? "CREDIT_VATABLE" : "CREDIT_VAT_FREE";
 		$rate = $this->rates[$rate_key];
@@ -61,7 +62,7 @@ class Billrun_Calculator_Rate_Credit extends Billrun_Calculator_Rate {
 				'$in' => array('CREDIT_VATABLE', 'CREDIT_VAT_FREE'),
 			),
 		);
-		$rates = $rates_coll->query($query)->cursor()->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'));
+		$rates = $rates_coll->query($query)->cursor();
 		$this->rates = array();
 		foreach ($rates as $rate) {
 			$rate->collection($rates_coll);

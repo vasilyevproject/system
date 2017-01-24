@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -23,7 +23,7 @@ class Billrun_DBRef {
 	protected static function initCollection($collection_name) {
 		if (isset(self::$keys[$collection_name])) {
 			$coll = Billrun_Factory::db()->{$collection_name . "Collection"}();
-			$resource = $coll->query()->cursor()->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'));
+			$resource = $coll->query()->cursor();
 			foreach ($resource as $entity) {
 				$entity->collection($coll);
 				self::$entities[$collection_name]['by_id'][strval($entity->getId())] = $entity;

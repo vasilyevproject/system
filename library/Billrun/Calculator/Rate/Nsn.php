@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -11,6 +11,7 @@
  *
  * @package  calculator
  * @since    0.5
+ * @deprecated since version 4.0
  */
 class Billrun_Calculator_Rate_Nsn extends Billrun_Calculator_Rate {
 
@@ -28,6 +29,7 @@ class Billrun_Calculator_Rate_Nsn extends Billrun_Calculator_Rate {
 
 	/**
 	 * @see Billrun_Calculator_Rate::getLineVolume
+	 * @deprecated since version 2.9
 	 */
 	protected function getLineVolume($row, $usage_type) {
 		if (in_array($usage_type, array('call', 'incoming_call'))) {
@@ -45,6 +47,7 @@ class Billrun_Calculator_Rate_Nsn extends Billrun_Calculator_Rate {
 
 	/**
 	 * @see Billrun_Calculator_Rate::getLineUsageType
+	 * @deprecated since version 2.9
 	 */
 	protected function getLineUsageType($row) {
 		switch ($row['record_type']) {
@@ -75,8 +78,8 @@ class Billrun_Calculator_Rate_Nsn extends Billrun_Calculator_Rate {
 		$matchedRate = false;
 
 		if ($record_type == "01" || //MOC call
-				($record_type == "11" && ($icg == "1001" || $icg == "1006" || ($icg >= "1201" && $icg <= "1209")) &&
-				$ocg != '3060' && $ocg != '3061') // Roaming on Cellcom and not redirection
+			($record_type == "11" && in_array($icg, Billrun_Util::getRoamingCircuitGroups()) &&
+			$ocg != '3060' && $ocg != '3061') // Roaming on Cellcom and not redirection
 		) {
 			$matchedRate = $this->getRateByParams($called_number, $usage_type, $line_time, $ocg);
 		} else if ($record_type == '30' && isset($row['ild_prefix'])) {
@@ -94,6 +97,7 @@ class Billrun_Calculator_Rate_Nsn extends Billrun_Calculator_Rate {
 	 * @param MongoDate $urt the time of the event
 	 * @param string $ocg the out circuit group of the event. If not supplied, ocg will be ignored in the search.
 	 * @return Mongodloid_Entity the matched rate or UNRATED rate if none found
+	 * @todo make same input as parent method
 	 */
 	protected function getRateByParams($called_number, $usage_type, $urt, $ocg = null) {
 		$matchedRate = $this->rates['UNRATED'];

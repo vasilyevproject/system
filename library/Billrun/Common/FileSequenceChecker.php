@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -13,7 +13,6 @@
  *  to the contructor.
  *  then call verifyFileSequence with the file name for each file you want to check.
  *
- * @author eran
  */
 class Billrun_Common_FileSequenceChecker {
 
@@ -41,7 +40,7 @@ class Billrun_Common_FileSequenceChecker {
 
 		if (!($sequenceData = call_user_func($this->getFileSequenceDataCallable, $filename))) {
 			$msg = "GGSN Reciever : Couldnt parse received file : $filename !!!!";
-			Billrun_Factory::log()->log($msg, Zend_Log::ALERT);
+			Billrun_Factory::log($msg, Zend_Log::ALERT);
 			return $msg;
 		}
 

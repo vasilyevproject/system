@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 require_once APPLICATION_PATH . '/application/controllers/Action/Api.php';
@@ -15,11 +15,15 @@ require_once APPLICATION_PATH . '/application/controllers/Action/Api.php';
  * @since    2.6
  */
 class PlansAction extends ApiAction {
+	use Billrun_Traits_Api_UserPermissions;
 
 	public function execute() {
-		Billrun_Factory::log()->log("Execute plans api call", Zend_Log::INFO);
+		$this->allowed();
+		Billrun_Factory::log("Execute plans api call", Zend_Log::INFO);
 		$request = $this->getRequest();
 
+		// If no query received, using empty array as default. 
+		// TODO: Is this correct? or should an error be raised if no query received?
 		$requestedQuery = $request->get('query', array());
 		$query = $this->processQuery($requestedQuery);
 		$strip = $this->getCompundParam($request->get('strip', false), false);
@@ -33,18 +37,18 @@ class PlansAction extends ApiAction {
 			),
 			'stampParams' => array($requestedQuery, $filter, $strip),
 		);
-		
-		$this->setCacheLifeTime(86400); // 1 day
+
+		$this->setCacheLifeTime(Billrun_Utils_Time::daysToSeconds(1));
 		$results = $this->cache($cacheParams);
-		
+
 		$this->getController()->setOutput(array(array(
 				'status' => 1,
 				'desc' => 'success',
 				'details' => $results,
 				'input' => $request->getRequest(),
-			)));
+		)));
 	}
-	
+
 	/**
 	 * basic fetch data method used by the cache
 	 * 
@@ -60,17 +64,17 @@ class PlansAction extends ApiAction {
 			$params['query'] = array();
 		}
 		$params['query']['$or'] = array(
-				array(
-					'hiddenFromApi' => array(
-						'$exists' => 0,
-					)
-				),
-				array(
-					'hiddenFromApi' => false
-				),
-				array(
-					'hiddenFromApi' => 0
+			array(
+				'hiddenFromApi' => array(
+					'$exists' => 0,
 				)
+			),
+			array(
+				'hiddenFromApi' => false
+			),
+			array(
+				'hiddenFromApi' => 0
+			)
 		);
 		$model = new PlansModel(array('sort' => array('from' => 1)));
 		$resource = $model->getData($params['query'], $params['filter']);
@@ -79,14 +83,28 @@ class PlansAction extends ApiAction {
 		} else if ($resource instanceof Mongodloid_Cursor) {
 			$results = array();
 			foreach ($resource as $item) {
-				$results[] = $item->getRawData();
+				$rawItem = $item->getRawData();
+				$results[] = Billrun_Utils_Mongo::convertRecordMongoDatetimeFields($rawItem);
 			}
 		}
 		if (isset($params['strip']) && !empty($params['strip'])) {
 			$results = $this->stripResults($results, $params['strip']);
 		}
 		return $results;
+	}
 
+	/**
+	 * Change the times of a mongo record
+	 * @param record - Record to change the times of.
+	 * @return The record with translated time.
+	 * @deprecated There isw a function in the util module.
+	 */
+	protected function setTimeToReadable($record) {
+		foreach (array('from', 'to') as $timeField) {
+			$record[$timeField] = date(DATE_ISO8601, $record[$timeField]->sec);
+		}
+
+		return $record;
 	}
 
 	/**
@@ -95,21 +113,21 @@ class PlansAction extends ApiAction {
 	 * @return array containing the processed query.
 	 */
 	protected function processQuery($query) {
-		$retQuery = array();
-		if (isset($query)) {
-			$retQuery = $this->getCompundParam($query, array());
+		$retQuery = $this->getCompundParam($query, array());
 
-			if (!isset($retQuery['from'])) {
-				$retQuery['from']['$lte'] = new MongoDate();
-			} else {
-				$retQuery['from'] = $this->intToMongoDate($retQuery['from']);
-			}
-			if (!isset($retQuery['to'])) {
-				$retQuery['to']['$gte'] = new MongoDate();
-			} else {
-				$retQuery['to'] = $this->intToMongoDate($retQuery['to']);
-			}
+		// TODO: This code appears multiple times in the project, 
+		// should be moved to a more general class.
+		if (!isset($retQuery['from'])) {
+			$retQuery['from']['$lte'] = new MongoDate();
+		} else {
+			$retQuery['from'] = $this->intToMongoDate($retQuery['from']);
 		}
+		if (!isset($retQuery['to'])) {
+			$retQuery['to']['$gte'] = new MongoDate();
+		} else {
+			$retQuery['to'] = $this->intToMongoDate($retQuery['to']);
+		}
+
 		return $retQuery;
 	}
 
@@ -137,6 +155,7 @@ class PlansAction extends ApiAction {
 	 * @param type $results
 	 * @param type $strip
 	 * @return type
+	 * TODO: This function is found in the project multiple times, should be moved to a better location.
 	 */
 	protected function stripResults($results, $strip) {
 		$stripped = array();
@@ -160,8 +179,8 @@ class PlansAction extends ApiAction {
 	 * @return type
 	 */
 	protected function getCompundParam($param, $retParam = array()) {
-		if(isset($param)) {
-			$retParam =  $param ;
+		if (isset($param)) {
+			$retParam = $param;
 			if ($param !== FALSE) {
 				if (is_string($param)) {
 					$retParam = json_decode($param, true);
@@ -171,6 +190,10 @@ class PlansAction extends ApiAction {
 			}
 		}
 		return $retParam;
+	}
+
+	protected function getPermissionLevel() {
+		return Billrun_Traits_Api_IUserPermissions::PERMISSION_READ;
 	}
 
 }

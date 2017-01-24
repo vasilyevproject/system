@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -34,7 +34,7 @@ class LogModel extends TableModel {
 	}
 
 	public function getDataByStamp($filter_query = array()) {
-		$cursor = $this->collection->query($filter_query)->cursor()->setReadPreference(Billrun_Factory::config()->getConfigValue('read_only_db_pref'));
+		$cursor = $this->collection->query($filter_query)->cursor();
 		$this->_count = $cursor->count();
 		return $cursor->current();
 	}

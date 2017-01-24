@@ -2,7 +2,7 @@
 
 /**
  * @package         Billing
- * @copyright       Copyright (C) 2012-2013 S.D.O.C. LTD. All rights reserved.
+ * @copyright       Copyright (C) 2012-2016 BillRun Technologies Ltd. All rights reserved.
  * @license         GNU Affero General Public License Version 3; see LICENSE.txt
  */
 
@@ -33,30 +33,16 @@ class Billrun_Receiver_Ftp extends Billrun_Receiver {
 	 * 
 	 * @param string
 	 */
-	protected $ftp_path = '/';
 	protected $ftpConfig = false;
-
 	protected $checkReceivedSize = true;
+
 	public function __construct($options) {
 		parent::__construct($options);
-		$this->ftpConfig = isset($options['ftp']['host']) ? array($options['ftp']) : $options['ftp'];
+		$this->ftpConfig = $options['receiver']['connections'];
 
-		if (isset($options['ftp']['remote_directory'])) {
-			$this->ftp_path = $options['ftp']['remote_directory'];
+		if (isset($options['receiver']['check_received_size'])) {
+			$this->checkReceivedSize = $options['receiver']['check_received_size'];
 		}
-
-		if (isset($options['workspace'])) {
-			$this->workspace = $options['workspace'];
-		}
-
-		if (isset($options['received']['check_received_size'])) {
-			$this->checkReceivedSize = $options['received']['check_received_size'];
-		}
-
-		Zend_Ftp_Factory::registerParserType(Zend_Ftp::UNKNOWN_SYSTEM_TYPE, 'Zend_Ftp_Parser_NsnFtpParser');
-		Zend_Ftp_Factory::registerInteratorType(Zend_Ftp::UNKNOWN_SYSTEM_TYPE, 'Zend_Ftp_Directory_NsnIterator');
-		Zend_Ftp_Factory::registerFileType(Zend_Ftp::UNKNOWN_SYSTEM_TYPE, 'Zend_Ftp_File_NsnCDRFile');
-		Zend_Ftp_Factory::registerDirecotryType(Zend_Ftp::UNKNOWN_SYSTEM_TYPE, 'Zend_Ftp_Directory_Nsn');
 	}
 
 	/**
@@ -68,23 +54,29 @@ class Billrun_Receiver_Ftp extends Billrun_Receiver {
 		$ret = array();
 		Billrun_Factory::dispatcher()->trigger('beforeFTPReceiveFullRun', array($this));
 
-		foreach ($this->ftpConfig as $hostName => $config) {
+		foreach ($this->ftpConfig as $config) {
 			if (!is_array($config)) {
 				continue;
 			}
+			$hostName = $config['name'];
 
 			if (is_numeric($hostName)) {
 				$hostName = '';
+			}
+			if (!empty($config['remote_directory']) && substr($config['remote_directory'], -1) != DIRECTORY_SEPARATOR) {
+				$config['remote_directory'] .= DIRECTORY_SEPARATOR;
 			}
 
 			$this->ftp = Zend_Ftp::connect($config['host'], $config['user'], $config['password']);
 			$this->ftp->setPassive(isset($config['passive']) ? $config['passive'] : false);
 
+			$hostRet = array();
 			Billrun_Factory::dispatcher()->trigger('beforeFTPReceive', array($this, $hostName));
 			try {
 				$hostRet = $this->receiveFromHost($hostName, $config);
 			} catch (Exception $e) {
-				Billrun_Factory::log()->log("FTP: Fail when downloading from : $hostName with exception : " . $e, Zend_Log::DEBUG);
+				Billrun_Factory::log("FTP: Fail when downloading from : $hostName with exception : " . $e->getMessage(), Zend_Log::ALERT);
+				return $ret;
 			}
 			Billrun_Factory::dispatcher()->trigger('afterFTPReceived', array($this, $hostRet, $hostName));
 
@@ -105,10 +97,10 @@ class Billrun_Receiver_Ftp extends Billrun_Receiver {
 		$ret = array();
 		$files = $this->ftp->getDirectory($config['remote_directory'])->getContents();
 
-		Billrun_Factory::log()->log("FTP: Starting to receive from remote host : $hostName", Zend_Log::INFO);
+		Billrun_Factory::log("FTP: Starting to receive from remote host : $hostName", Zend_Log::INFO);
 		$count = 0;
 		foreach ($this->sortByFileDate($files) as $file) {
-			Billrun_Factory::log()->log("FTP: Found file " . $file->name . " on remote host", Zend_Log::INFO);
+			Billrun_Factory::log("FTP: Found file " . $file->name . " on remote host", Zend_Log::INFO);
 			$extraData = array();
 			Billrun_Factory::dispatcher()->trigger('beforeFTPFileReceived', array(&$file, $this, $hostName, &$extraData));
 			$isFileReceivedMoreFields = array('retrieved_from' => $hostName);
@@ -116,13 +108,13 @@ class Billrun_Receiver_Ftp extends Billrun_Receiver {
 				$isFileReceivedMoreFields['extra_data'] = $extraData;
 			}
 
-			if(!$this->shouldFileBeReceived($file, $isFileReceivedMoreFields) ) {
+			if (!$this->shouldFileBeReceived($file, $isFileReceivedMoreFields)) {
 				continue;
 			}
 
 			$fileData = $this->getFileLogData($file->name, static::$type, $isFileReceivedMoreFields);
 
-			Billrun_Factory::log()->log("FTP: Download file " . $file->name . " from remote host", Zend_Log::INFO);
+			Billrun_Factory::log("FTP: Download file " . $file->name . " from remote host", Zend_Log::INFO);
 			$targetPath = $this->workspace;
 			if (substr($targetPath, -1) != '/') {
 				$targetPath .= '/';
@@ -132,12 +124,12 @@ class Billrun_Receiver_Ftp extends Billrun_Receiver {
 				mkdir($targetPath, 0777, true);
 			}
 			if ($file->saveToPath($targetPath, null, 0, true) === FALSE) { // the last arg declare try to recover on failure
-				Billrun_Factory::log()->log("FTP: failed to download " . $file->name . " from remote host", Zend_Log::ALERT);
+				Billrun_Factory::log("FTP: failed to download " . $file->name . " from remote host", Zend_Log::ALERT);
 				continue;
 			}
 			$fileData['path'] = $targetPath . $file->name;
 
-			if (!$this->isFileReceivedCorrectly($file, $fileData['path'])) {			
+			if (!$this->isFileReceivedCorrectly($file, $fileData['path'])) {
 				continue;
 			}
 			if ($this->preserve_timestamps) {
@@ -148,18 +140,18 @@ class Billrun_Receiver_Ftp extends Billrun_Receiver {
 			}
 			Billrun_Factory::dispatcher()->trigger('afterFTPFileReceived', array(&$fileData['path'], $file, $this, $hostName, $extraData));
 
-			if(!empty($this->backupPaths)) {
+			if (!empty($this->backupPaths)) {
 				$backedTo = $this->backup($fileData['path'], $file->name, $this->backupPaths, $hostName, FALSE);
 				Billrun_Factory::dispatcher()->trigger('beforeReceiverBackup', array($this, &$fileData['path'], $hostName));
 				$fileData['backed_to'] = $backedTo;
 				Billrun_Factory::dispatcher()->trigger('afterReceiverBackup', array($this, &$fileData['path'], $hostName));
 			}
-			if ($this->logDB($fileData)) {				
+			if ($this->logDB($fileData)) {
 				$ret[] = $fileData['path'];
 				$count++; //count the file as recieved
 				// delete the file after downloading and store it to processing queue
 				if (Billrun_Factory::config()->isProd() && (isset($config['delete_received']) && $config['delete_received'] )) {
-					Billrun_Factory::log()->log("FTP: Deleting file {$file->name} from remote host ", Zend_Log::INFO);
+					Billrun_Factory::log("FTP: Deleting file {$file->name} from remote host ", Zend_Log::INFO);
 					$file->delete();
 				}
 			}
@@ -169,7 +161,7 @@ class Billrun_Receiver_Ftp extends Billrun_Receiver {
 		}
 		return $ret;
 	}
-	
+
 	/**
 	 * Check if a remote file shold be received for further processing.
 	 * @param type $file
@@ -177,13 +169,13 @@ class Billrun_Receiver_Ftp extends Billrun_Receiver {
 	protected function shouldFileBeReceived($file, $isFileReceivedMoreFields) {
 		$ret = true;
 		if (!$file->isFile()) {
-			Billrun_Factory::log()->log("FTP: " . $file->name . " is not a file", Zend_Log::INFO);
+			Billrun_Factory::log("FTP: " . $file->name . " is not a file", Zend_Log::INFO);
 			$ret = false;
-		}else if (!$this->isFileValid($file->name, $file->path)) {
-			Billrun_Factory::log()->log("FTP: " . $file->name . " is not a valid file", Zend_Log::INFO);
+		} else if (!$this->isFileValid($file->name, $file->path)) {
+			Billrun_Factory::log("FTP: " . $file->name . " is not a valid file", Zend_Log::INFO);
 			$ret = false;
 		} else if (!$this->lockFileForReceive($file->name, static::$type, $isFileReceivedMoreFields)) {
-			Billrun_Factory::log()->log("FTP: " . $file->name . " received already", Zend_Log::INFO);
+			Billrun_Factory::log("FTP: " . $file->name . " received already", Zend_Log::INFO);
 			$ret = false;
 		}
 		return $ret;
@@ -193,12 +185,12 @@ class Billrun_Receiver_Ftp extends Billrun_Receiver {
 	 * check if the received file was correctly received
 	 * @param type $param
 	 */
-	protected function isFileReceivedCorrectly($remoteFile,$localFilePath) {
-		if($this->checkReceivedSize) {
+	protected function isFileReceivedCorrectly($remoteFile, $localFilePath) {
+		if ($this->checkReceivedSize) {
 			$local_size = filesize($localFilePath);
 			$remote_size = $remoteFile->size();
 			if ($local_size !== $remote_size) {
-				Billrun_Factory::log()->log("FTP: The remote file size (" . $remote_size . ") is different from local file size (" . $local_size . ")", Zend_Log::ERR);
+				Billrun_Factory::log("FTP: The remote file size (" . $remote_size . ") is different from local file size (" . $local_size . "). File name: " . $remoteFile->name, Zend_Log::ERR);
 				return false;
 			}
 		}
