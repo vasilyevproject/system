@@ -1,3 +1,8 @@
+Note
+======
+
+Soon we will move to GitLab.
+
 About
 ======
 
