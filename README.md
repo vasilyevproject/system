@@ -1,7 +1,7 @@
 Note
 ======
 
-Soon we will move to GitLab.
+The project has been migrated to GitLab: http://git.bill.run
 
 About
 ======
